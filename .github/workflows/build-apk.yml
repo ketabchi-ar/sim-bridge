@@ -30,6 +30,9 @@ jobs:
       - name: Grant Execute Permission for Gradlew
         run: chmod +x gradlew
 
+      - name: Check Gradle Version
+        run: ./gradlew --version
+
       - name: Build Debug APK
         run: ./gradlew assembleDebug --stacktrace
 
