@@ -1,0 +1,22 @@
+<resources>
+    <string name="app_name">SIM Bridge</string>
+    <string name="gateway_mode">گوشی اول (سیم‌کارت‌دار - میزبان)</string>
+    <string name="client_mode">گوشی دوم (بدون سیم‌کارت - کلاینت)</string>
+    <string name="server_listening">سرور فعال - در انتظار اتصال گوشی دوم...</string>
+    <string name="client_disconnected">عدم اتصال به میزبان</string>
+    <string name="client_connecting">در حال اتصال به میزبان...</string>
+    <string name="client_connected">متصل به میزبان ✓</string>
+    <string name="start_server">فعال‌سازی سرویس میزبان</string>
+    <string name="stop_server">توقف سرویس میزبان</string>
+    <string name="connect">اتصال به بلوتوث</string>
+    <string name="disconnect">قطع اتصال</string>
+    <string name="send_sms">ارسال پیامک از طریق سیم‌کارت</string>
+    <string name="phone_number">شماره مقصد</string>
+    <string name="message_text">متن پیامک...</string>
+    <string name="send">ارسال</string>
+    <string name="incoming_call_title">تماس ورودی مخابراتی</string>
+    <string name="answer_call">پاسخ</string>
+    <string name="reject_call">رد تماس</string>
+    <string name="end_call">قطع تماس</string>
+    <string name="tethering_hint">نکته اینترنت: در گوشی اول وارد تنظیمات شده و Bluetooth Tethering را روشن کنید تا اینترنت بدون داغ شدن منتقل شود.</string>
+</resources>
