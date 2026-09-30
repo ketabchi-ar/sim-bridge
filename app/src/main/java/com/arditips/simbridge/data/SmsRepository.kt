@@ -10,8 +10,9 @@ import android.net.Uri
 import android.provider.ContactsContract
 import com.arditips.simbridge.model.ChatConversation
 import com.arditips.simbridge.model.ChatMessage
+import com.arditips.simbridge.util.PhoneNumberUtil
 
-class AppDatabaseHelper(context: Context) : SQLiteOpenHelper(context, "simbridge_chat.db", null, 1) {
+class AppDatabaseHelper(context: Context) : SQLiteOpenHelper(context, "simbridge_chat.db", null, 2) {
     override fun onCreate(db: SQLiteDatabase) {
         db.execSQL(
             """
@@ -44,9 +45,10 @@ object LocalMessageStore {
     @Synchronized
     fun saveMessage(context: Context, address: String, body: String, timestamp: Long, isOutgoing: Boolean) {
         init(context)
+        val normalized = PhoneNumberUtil.normalize(address)
         val db = dbHelper?.writableDatabase ?: return
         val values = ContentValues().apply {
-            put("address", address)
+            put("address", normalized)
             put("body", body)
             put("timestamp", timestamp)
             put("is_outgoing", if (isOutgoing) 1 else 0)
@@ -101,15 +103,17 @@ object LocalMessageStore {
         init(context)
         val list = mutableListOf<ChatMessage>()
         val db = dbHelper?.readableDatabase ?: return list
+        val targetNorm = PhoneNumberUtil.normalize(address)
         val contactName = SmsRepository.getContactName(context, address)
 
+        // Query all messages and filter by normalized phone matching
         var cursor: Cursor? = null
         try {
             cursor = db.query(
                 "messages",
                 arrayOf("id", "address", "body", "timestamp", "is_outgoing"),
-                "address = ?",
-                arrayOf(address),
+                null,
+                null,
                 null,
                 null,
                 "timestamp ASC"
@@ -121,16 +125,18 @@ object LocalMessageStore {
                 val timestamp = cursor.getLong(3)
                 val isOutgoing = cursor.getInt(4) == 1
 
-                list.add(
-                    ChatMessage(
-                        id = id,
-                        sender = msgAddress,
-                        senderName = contactName,
-                        body = body,
-                        timestamp = timestamp,
-                        isOutgoing = isOutgoing
+                if (PhoneNumberUtil.isSame(msgAddress, targetNorm)) {
+                    list.add(
+                        ChatMessage(
+                            id = id,
+                            sender = msgAddress,
+                            senderName = contactName,
+                            body = body,
+                            timestamp = timestamp,
+                            isOutgoing = isOutgoing
+                        )
                     )
-                )
+                }
             }
         } catch (_: Exception) {
         } finally {
@@ -175,7 +181,7 @@ object SmsRepository {
             return localList
         }
 
-        // Fallback to native system SMS inbox if local DB is empty
+        // Fallback to system messages
         val conversationsMap = mutableMapOf<String, ChatConversation>()
         val uri: Uri = android.provider.Telephony.Sms.CONTENT_URI
         val projection = arrayOf(
@@ -202,15 +208,16 @@ object SmsRepository {
                 val readIdx = it.getColumnIndex(android.provider.Telephony.Sms.READ)
 
                 while (it.moveToNext()) {
-                    val address = it.getString(addressIdx) ?: continue
+                    val rawAddress = it.getString(addressIdx) ?: continue
+                    val normalized = PhoneNumberUtil.normalize(rawAddress)
                     val body = it.getString(bodyIdx) ?: ""
                     val date = it.getLong(dateIdx)
                     val read = it.getInt(readIdx)
 
-                    if (!conversationsMap.containsKey(address)) {
-                        val name = getContactName(context, address)
-                        conversationsMap[address] = ChatConversation(
-                            contact = address,
+                    if (!conversationsMap.containsKey(normalized)) {
+                        val name = getContactName(context, rawAddress)
+                        conversationsMap[normalized] = ChatConversation(
+                            contact = normalized,
                             contactName = name,
                             lastMessage = body,
                             timestamp = date,
@@ -233,7 +240,6 @@ object SmsRepository {
             return localMsgs
         }
 
-        // Fallback to native system messages
         val list = mutableListOf<ChatMessage>()
         val uri: Uri = android.provider.Telephony.Sms.CONTENT_URI
         val projection = arrayOf(
@@ -250,8 +256,8 @@ object SmsRepository {
             cursor = context.contentResolver.query(
                 uri,
                 projection,
-                "${android.provider.Telephony.Sms.ADDRESS} = ?",
-                arrayOf(contactAddress),
+                null,
+                null,
                 "${android.provider.Telephony.Sms.DATE} ASC"
             )
 
@@ -264,7 +270,9 @@ object SmsRepository {
 
                 while (it.moveToNext()) {
                     val id = it.getLong(idIdx)
-                    val address = it.getString(addressIdx) ?: contactAddress
+                    val address = it.getString(addressIdx) ?: ""
+                    if (!PhoneNumberUtil.isSame(address, contactAddress)) continue
+
                     val body = it.getString(bodyIdx) ?: ""
                     val date = it.getLong(dateIdx)
                     val type = it.getInt(typeIdx)

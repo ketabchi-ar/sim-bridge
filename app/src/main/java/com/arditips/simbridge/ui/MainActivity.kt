@@ -11,8 +11,10 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.content.pm.PackageManager
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.provider.ContactsContract
 import android.view.View
 import android.widget.ScrollView
 import android.widget.TextView
@@ -27,10 +29,10 @@ import com.arditips.simbridge.R
 import com.arditips.simbridge.data.SmsRepository
 import com.arditips.simbridge.databinding.ActivityMainBinding
 import com.arditips.simbridge.model.BridgeEventItem
-import com.arditips.simbridge.model.ChatConversation
 import com.arditips.simbridge.service.ClientBridgeService
 import com.arditips.simbridge.service.GatewayBridgeService
 import com.arditips.simbridge.util.AppLog
+import com.arditips.simbridge.util.PhoneNumberUtil
 import com.google.android.material.tabs.TabLayout
 import com.google.gson.Gson
 import kotlinx.coroutines.Dispatchers
@@ -43,7 +45,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var binding: ActivityMainBinding
     private val eventAdapter = EventAdapter()
     private val gson = Gson()
-    private var isGatewayMode = true
+    private var currentTab = 0 // 0: Gateway, 1: Client, 2: Messages
 
     private lateinit var conversationAdapter: ConversationAdapter
 
@@ -75,6 +77,17 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    private val contactPickerLauncher = registerForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        if (result.resultCode == RESULT_OK) {
+            val contactUri: Uri? = result.data?.data
+            contactUri?.let { uri ->
+                extractContactPhone(uri)
+            }
+        }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         try {
@@ -101,9 +114,7 @@ class MainActivity : AppCompatActivity() {
     override fun onResume() {
         super.onResume()
         updateModeUi()
-        if (!isGatewayMode) {
-            loadConversations()
-        }
+        loadConversations()
     }
 
     private fun setupRecyclerView() {
@@ -123,9 +134,9 @@ class MainActivity : AppCompatActivity() {
     private fun setupTabs() {
         binding.tabLayoutMode.addOnTabSelectedListener(object : TabLayout.OnTabSelectedListener {
             override fun onTabSelected(tab: TabLayout.Tab?) {
-                isGatewayMode = tab?.position == 0
+                currentTab = tab?.position ?: 0
                 updateModeUi()
-                if (!isGatewayMode) {
+                if (currentTab == 2) {
                     loadConversations()
                 }
             }
@@ -145,39 +156,51 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun updateModeUi() {
-        if (isGatewayMode) {
-            binding.tvStatusTitle.text = "گوشی ۱ (میزبان سیم‌کارت)"
-            binding.btnSelectDevice.visibility = View.GONE
-            binding.cardSendSms.visibility = View.GONE
-            binding.layoutConversationsSection.visibility = View.GONE
+        when (currentTab) {
+            0 -> {
+                // Gateway Mode
+                binding.scrollControls.visibility = View.VISIBLE
+                binding.layoutMessagesTab.visibility = View.GONE
 
-            val isRunning = GatewayBridgeService.instance != null
-            if (isRunning) {
-                binding.tvStatusMessage.text = "میزبان فعال است - در حال دریافت تماس و پیامک"
-                binding.viewStatusDot.backgroundTintList = ContextCompat.getColorStateList(this, android.R.color.holo_green_light)
-                binding.btnToggleService.text = "توقف سرویس میزبان"
-            } else {
-                binding.tvStatusMessage.text = "سرویس میزبان متوقف است"
-                binding.viewStatusDot.backgroundTintList = ContextCompat.getColorStateList(this, android.R.color.holo_red_light)
-                binding.btnToggleService.text = "شروع به کار میزبان (گوشی ۱)"
-            }
-        } else {
-            binding.tvStatusTitle.text = "گوشی ۲ (کلاینت بدون سیم‌کارت)"
-            binding.btnSelectDevice.visibility = View.VISIBLE
-            binding.cardSendSms.visibility = View.VISIBLE
-            binding.layoutConversationsSection.visibility = View.VISIBLE
-
-            val isRunning = ClientBridgeService.instance != null
-            if (isRunning) {
-                binding.tvStatusMessage.text = "متصل به گوشی ۱ ✓"
-                binding.viewStatusDot.backgroundTintList = ContextCompat.getColorStateList(this, android.R.color.holo_green_light)
-                binding.btnToggleService.text = "قطع اتصال از گوشی ۱"
+                binding.tvStatusTitle.text = "گوشی ۱ (میزبان سیم‌کارت)"
                 binding.btnSelectDevice.visibility = View.GONE
-            } else {
-                binding.tvStatusMessage.text = "در انتظار اتصال به گوشی ۱"
-                binding.viewStatusDot.backgroundTintList = ContextCompat.getColorStateList(this, android.R.color.holo_orange_light)
-                binding.btnToggleService.text = "انتخاب و اتصال سریع به گوشی ۱"
+
+                val isRunning = GatewayBridgeService.instance != null
+                if (isRunning) {
+                    binding.tvStatusMessage.text = "میزبان فعال است - در حال دریافت تماس و پیامک"
+                    binding.viewStatusDot.backgroundTintList = ContextCompat.getColorStateList(this, android.R.color.holo_green_light)
+                    binding.btnToggleService.text = "توقف سرویس میزبان"
+                } else {
+                    binding.tvStatusMessage.text = "سرویس میزبان متوقف است"
+                    binding.viewStatusDot.backgroundTintList = ContextCompat.getColorStateList(this, android.R.color.holo_red_light)
+                    binding.btnToggleService.text = "شروع به کار میزبان (گوشی ۱)"
+                }
+            }
+            1 -> {
+                // Client Mode
+                binding.scrollControls.visibility = View.VISIBLE
+                binding.layoutMessagesTab.visibility = View.GONE
+
+                binding.tvStatusTitle.text = "گوشی ۲ (کلاینت بدون سیم‌کارت)"
                 binding.btnSelectDevice.visibility = View.VISIBLE
+
+                val isRunning = ClientBridgeService.instance != null
+                if (isRunning) {
+                    binding.tvStatusMessage.text = "متصل به گوشی ۱ ✓"
+                    binding.viewStatusDot.backgroundTintList = ContextCompat.getColorStateList(this, android.R.color.holo_green_light)
+                    binding.btnToggleService.text = "قطع اتصال از گوشی ۱"
+                    binding.btnSelectDevice.visibility = View.GONE
+                } else {
+                    binding.tvStatusMessage.text = "در انتظار اتصال به گوشی ۱"
+                    binding.viewStatusDot.backgroundTintList = ContextCompat.getColorStateList(this, android.R.color.holo_orange_light)
+                    binding.btnToggleService.text = "انتخاب و اتصال سریع به گوشی ۱"
+                    binding.btnSelectDevice.visibility = View.VISIBLE
+                }
+            }
+            2 -> {
+                // Dedicated Messages Tab
+                binding.scrollControls.visibility = View.GONE
+                binding.layoutMessagesTab.visibility = View.VISIBLE
             }
         }
     }
@@ -185,6 +208,11 @@ class MainActivity : AppCompatActivity() {
     private fun setupActions() {
         binding.btnViewLogs.setOnClickListener {
             showLogsDialog()
+        }
+
+        binding.btnPickContact.setOnClickListener {
+            val intent = Intent(Intent.ACTION_PICK, ContactsContract.CommonDataKinds.Phone.CONTENT_URI)
+            contactPickerLauncher.launch(intent)
         }
 
         binding.tvRefreshConversations.setOnClickListener {
@@ -199,7 +227,7 @@ class MainActivity : AppCompatActivity() {
 
         binding.btnToggleService.setOnClickListener {
             try {
-                if (isGatewayMode) {
+                if (currentTab == 0) {
                     toggleGatewayService()
                 } else {
                     if (ClientBridgeService.instance == null) {
@@ -225,17 +253,18 @@ class MainActivity : AppCompatActivity() {
 
         binding.btnSendSms.setOnClickListener {
             try {
-                val recipient = binding.etRecipient.text?.toString()?.trim() ?: ""
+                val rawRecipient = binding.etRecipient.text?.toString()?.trim() ?: ""
                 val body = binding.etMessageBody.text?.toString()?.trim() ?: ""
 
-                if (recipient.isEmpty() || body.isEmpty()) {
+                if (rawRecipient.isEmpty() || body.isEmpty()) {
                     Toast.makeText(this, "شماره مقصد و متن پیام را وارد کنید", Toast.LENGTH_SHORT).show()
                     return@setOnClickListener
                 }
 
+                val recipient = PhoneNumberUtil.normalize(rawRecipient)
                 val client = ClientBridgeService.instance
                 if (client == null) {
-                    Toast.makeText(this, "ابتدا به گوشی اول متصل شوید", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(this, "ابتدا در تب گوشی ۲ به گوشی اول متصل شوید", Toast.LENGTH_SHORT).show()
                     return@setOnClickListener
                 }
 
@@ -250,6 +279,21 @@ class MainActivity : AppCompatActivity() {
             } catch (e: Exception) {
                 AppLog.e(tag, "Error sending SMS", e)
             }
+        }
+    }
+
+    @SuppressLint("Range")
+    private fun extractContactPhone(contactUri: Uri) {
+        var cursor = contentResolver.query(contactUri, arrayOf(ContactsContract.CommonDataKinds.Phone.NUMBER), null, null, null)
+        try {
+            if (cursor != null && cursor.moveToFirst()) {
+                val rawNumber = cursor.getString(cursor.getColumnIndex(ContactsContract.CommonDataKinds.Phone.NUMBER))
+                binding.etRecipient.setText(PhoneNumberUtil.normalize(rawNumber))
+            }
+        } catch (e: Exception) {
+            AppLog.e(tag, "Failed to read contact phone: ${e.message}")
+        } finally {
+            cursor?.close()
         }
     }
 
@@ -373,10 +417,12 @@ class MainActivity : AppCompatActivity() {
         val permissions = mutableListOf(
             Manifest.permission.RECORD_AUDIO,
             Manifest.permission.MODIFY_AUDIO_SETTINGS,
+            Manifest.permission.READ_CONTACTS,
             Manifest.permission.RECEIVE_SMS,
             Manifest.permission.READ_SMS,
             Manifest.permission.SEND_SMS,
-            Manifest.permission.READ_PHONE_STATE
+            Manifest.permission.READ_PHONE_STATE,
+            Manifest.permission.READ_CALL_LOG
         )
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {

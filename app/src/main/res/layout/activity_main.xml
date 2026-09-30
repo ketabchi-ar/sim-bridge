@@ -30,7 +30,7 @@
 
         </com.google.android.material.appbar.MaterialToolbar>
 
-        <!-- Segmented Tab for Gateway / Client -->
+        <!-- Segmented 3-Tab Bar -->
         <com.google.android.material.tabs.TabLayout
             android:id="@+id/tabLayoutMode"
             android:layout_width="match_parent"
@@ -48,138 +48,247 @@
             <com.google.android.material.tabs.TabItem
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text="گوشی ۲ (بدون سیم‌کارت)" />
+                android:text="گوشی ۲ (کلاینت)" />
+
+            <com.google.android.material.tabs.TabItem
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="پیامک‌ها و چت" />
         </com.google.android.material.tabs.TabLayout>
     </com.google.android.material.appbar.AppBarLayout>
 
-    <androidx.core.widget.NestedScrollView
+    <FrameLayout
         android:layout_width="match_parent"
         android:layout_height="match_parent"
         app:layout_behavior="@string/appbar_scrolling_view_behavior">
 
-        <LinearLayout
+        <!-- TAB 1 & 2 CONTAINER (DEVICE CONTROLS) -->
+        <androidx.core.widget.NestedScrollView
+            android:id="@+id/scrollControls"
             android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:orientation="vertical"
-            android:padding="16dp">
+            android:layout_height="match_parent">
 
-            <!-- Hero Connection Card -->
-            <com.google.android.material.card.MaterialCardView
+            <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                app:cardBackgroundColor="@color/card_dark"
-                app:cardCornerRadius="16dp"
-                app:strokeColor="#2E3842"
-                app:strokeWidth="1dp"
-                android:layout_marginBottom="16dp">
+                android:orientation="vertical"
+                android:padding="16dp">
 
-                <LinearLayout
+                <!-- Hero Connection Card -->
+                <com.google.android.material.card.MaterialCardView
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:orientation="vertical"
-                    android:padding="18dp">
+                    app:cardBackgroundColor="@color/card_dark"
+                    app:cardCornerRadius="16dp"
+                    app:strokeColor="#2E3842"
+                    app:strokeWidth="1dp"
+                    android:layout_marginBottom="16dp">
 
                     <LinearLayout
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        android:gravity="center_vertical"
-                        android:orientation="horizontal">
+                        android:orientation="vertical"
+                        android:padding="18dp">
 
-                        <View
-                            android:id="@+id/viewStatusDot"
-                            android:layout_width="12dp"
-                            android:layout_height="12dp"
-                            android:background="@drawable/ic_launcher_foreground"
-                            android:backgroundTint="#FF5252" />
+                        <LinearLayout
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:gravity="center_vertical"
+                            android:orientation="horizontal">
+
+                            <View
+                                android:id="@+id/viewStatusDot"
+                                android:layout_width="12dp"
+                                android:layout_height="12dp"
+                                android:background="@drawable/ic_launcher_foreground"
+                                android:backgroundTint="#FF5252" />
+
+                            <TextView
+                                android:id="@+id/tvStatusTitle"
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:layout_marginStart="8dp"
+                                android:text="وضعیت اتصال"
+                                android:textColor="@color/white"
+                                android:textSize="17sp"
+                                android:textStyle="bold" />
+                        </LinearLayout>
 
                         <TextView
-                            android:id="@+id/tvStatusTitle"
+                            android:id="@+id/tvStatusMessage"
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
-                            android:layout_marginStart="8dp"
-                            android:text="وضعیت اتصال"
-                            android:textColor="@color/white"
-                            android:textSize="17sp"
-                            android:textStyle="bold" />
+                            android:layout_marginTop="6dp"
+                            android:text="سرویس متوقف است"
+                            android:textColor="@color/text_muted"
+                            android:textSize="14sp" />
+
+                        <!-- Gateway Action -->
+                        <com.google.android.material.button.MaterialButton
+                            android:id="@+id/btnToggleService"
+                            android:layout_width="match_parent"
+                            android:layout_height="52dp"
+                            android:layout_marginTop="16dp"
+                            android:text="@string/start_server"
+                            app:cornerRadius="12dp" />
+
+                        <!-- Client Action -->
+                        <com.google.android.material.button.MaterialButton
+                            android:id="@+id/btnSelectDevice"
+                            android:layout_width="match_parent"
+                            android:layout_height="52dp"
+                            android:layout_marginTop="10dp"
+                            android:text="جستجو و اتصال به گوشی ۱"
+                            android:visibility="gone"
+                            style="@style/Widget.Material3.Button.TonalButton"
+                            app:cornerRadius="12dp" />
                     </LinearLayout>
+                </com.google.android.material.card.MaterialCardView>
+
+                <!-- Live Events Section Header -->
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="horizontal"
+                    android:gravity="center_vertical"
+                    android:layout_marginBottom="8dp">
 
                     <TextView
-                        android:id="@+id/tvStatusMessage"
-                        android:layout_width="wrap_content"
+                        android:layout_width="0dp"
                         android:layout_height="wrap_content"
-                        android:layout_marginTop="6dp"
-                        android:text="سرویس متوقف است"
-                        android:textColor="@color/text_muted"
+                        android:layout_weight="1"
+                        android:text="رویدادهای زنده (تماس‌ها و پیامک‌ها)"
+                        android:textColor="@color/white"
+                        android:textStyle="bold"
                         android:textSize="14sp" />
 
-                    <!-- Gateway Action -->
-                    <com.google.android.material.button.MaterialButton
-                        android:id="@+id/btnToggleService"
-                        android:layout_width="match_parent"
-                        android:layout_height="52dp"
-                        android:layout_marginTop="16dp"
-                        android:text="@string/start_server"
-                        app:cornerRadius="12dp" />
-
-                    <!-- Client Action -->
-                    <com.google.android.material.button.MaterialButton
-                        android:id="@+id/btnSelectDevice"
-                        android:layout_width="match_parent"
-                        android:layout_height="52dp"
-                        android:layout_marginTop="10dp"
-                        android:text="جستجو و اتصال به گوشی ۱"
-                        android:visibility="gone"
-                        style="@style/Widget.Material3.Button.TonalButton"
-                        app:cornerRadius="12dp" />
+                    <TextView
+                        android:id="@+id/tvClearEvents"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="پاکسازی"
+                        android:textColor="@color/text_muted"
+                        android:textSize="12sp"
+                        android:padding="4dp" />
                 </LinearLayout>
-            </com.google.android.material.card.MaterialCardView>
 
-            <!-- Send Quick SMS Card (Client Mode) -->
+                <androidx.recyclerview.widget.RecyclerView
+                    android:id="@+id/recyclerViewEvents"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:nestedScrollingEnabled="false"
+                    android:layout_marginBottom="16dp" />
+
+                <!-- Helpful Setup Card -->
+                <com.google.android.material.card.MaterialCardView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    app:cardBackgroundColor="#13202E"
+                    app:cardCornerRadius="14dp"
+                    app:strokeColor="#1F3A56"
+                    app:strokeWidth="1dp">
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="vertical"
+                        android:padding="14dp">
+
+                        <TextView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="💡 راهنمای اتصال سریع:"
+                            android:textColor="#80D8FF"
+                            android:textStyle="bold"
+                            android:textSize="13sp" />
+
+                        <TextView
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="4dp"
+                            android:text="۱. هر دو گوشی را ابتدا یک‌بار در بلوتوث Pair کنید.\n۲. در گوشی اول روی شروع بزنید، در گوشی دوم روی اتصال به گوشی ۱ بزنید.\n۳. از تب «پیامک‌ها و چت» برای گفتگو و ارسال پیامک از سیم‌کارت اولی استفاده کنید."
+                            android:textColor="#B0BEC5"
+                            android:lineSpacingExtra="3dp"
+                            android:textSize="12sp" />
+                    </LinearLayout>
+                </com.google.android.material.card.MaterialCardView>
+
+            </LinearLayout>
+        </androidx.core.widget.NestedScrollView>
+
+        <!-- TAB 3 CONTAINER: DEDICATED MESSAGES & CHAT INBOX -->
+        <LinearLayout
+            android:id="@+id/layoutMessagesTab"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:orientation="vertical"
+            android:padding="16dp"
+            android:visibility="gone">
+
+            <!-- New Message Compose Box with Contact Picker -->
             <com.google.android.material.card.MaterialCardView
-                android:id="@+id/cardSendSms"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 app:cardBackgroundColor="@color/card_dark"
                 app:cardCornerRadius="16dp"
                 app:strokeColor="#2E3842"
                 app:strokeWidth="1dp"
-                android:layout_marginBottom="16dp"
-                android:visibility="gone">
+                android:layout_marginBottom="14dp">
 
                 <LinearLayout
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:orientation="vertical"
-                    android:padding="18dp">
+                    android:padding="16dp">
 
                     <TextView
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:text="ارسال پیامک جدید از سیم‌کارت گوشی ۱"
+                        android:text="ارسال پیامک جدید"
                         android:textColor="@color/white"
                         android:textStyle="bold"
                         android:textSize="15sp" />
 
-                    <com.google.android.material.textfield.TextInputLayout
+                    <!-- Recipient Row with Contact Picker Button -->
+                    <LinearLayout
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
                         android:layout_marginTop="10dp"
-                        android:hint="شماره مقصد (مثلاً 0912...)"
-                        style="@style/Widget.Material3.TextInputLayout.OutlinedBox">
+                        android:gravity="center_vertical"
+                        android:orientation="horizontal">
 
-                        <com.google.android.material.textfield.TextInputEditText
-                            android:id="@+id/etRecipient"
-                            android:layout_width="match_parent"
+                        <com.google.android.material.textfield.TextInputLayout
+                            android:layout_width="0dp"
                             android:layout_height="wrap_content"
-                            android:inputType="phone"
-                            android:textColor="@color/white" />
-                    </com.google.android.material.textfield.TextInputLayout>
+                            android:layout_weight="1"
+                            android:hint="شماره یا مخاطب"
+                            style="@style/Widget.Material3.TextInputLayout.OutlinedBox">
+
+                            <com.google.android.material.textfield.TextInputEditText
+                                android:id="@+id/etRecipient"
+                                android:layout_width="match_parent"
+                                android:layout_height="wrap_content"
+                                android:inputType="phone"
+                                android:textColor="@color/white" />
+                        </com.google.android.material.textfield.TextInputLayout>
+
+                        <com.google.android.material.button.MaterialButton
+                            android:id="@+id/btnPickContact"
+                            android:layout_width="48dp"
+                            android:layout_height="56dp"
+                            android:layout_marginStart="8dp"
+                            style="@style/Widget.Material3.Button.TonalButton"
+                            app:icon="@android:drawable/ic_menu_myplaces"
+                            app:iconGravity="textStart"
+                            app:iconPadding="0dp"
+                            app:cornerRadius="12dp" />
+                    </LinearLayout>
 
                     <com.google.android.material.textfield.TextInputLayout
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
                         android:layout_marginTop="8dp"
-                        android:hint="متن پیامک"
+                        android:hint="متن پیامک..."
                         style="@style/Widget.Material3.TextInputLayout.OutlinedBox">
 
                         <com.google.android.material.textfield.TextInputEditText
@@ -196,122 +305,46 @@
                         android:layout_width="match_parent"
                         android:layout_height="48dp"
                         android:layout_marginTop="12dp"
-                        android:text="ارسال لحظه‌ای پیامک"
+                        android:text="ارسال لحظه‌ای با سیم‌کارت اول"
                         app:cornerRadius="10dp" />
                 </LinearLayout>
             </com.google.android.material.card.MaterialCardView>
 
-            <!-- Conversations (Messages Inbox) Section for Client Mode -->
-            <LinearLayout
-                android:id="@+id/layoutConversationsSection"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:orientation="vertical"
-                android:layout_marginBottom="16dp"
-                android:visibility="gone">
-
-                <LinearLayout
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:orientation="horizontal"
-                    android:gravity="center_vertical"
-                    android:layout_marginBottom="8dp">
-
-                    <TextView
-                        android:layout_width="0dp"
-                        android:layout_height="wrap_content"
-                        android:layout_weight="1"
-                        android:text="صندوق پیام‌ها و گفتگوها"
-                        android:textColor="@color/white"
-                        android:textStyle="bold"
-                        android:textSize="15sp" />
-
-                    <TextView
-                        android:id="@+id/tvRefreshConversations"
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:text="بروزرسانی"
-                        android:textColor="@color/teal_200"
-                        android:textSize="12sp"
-                        android:padding="4dp" />
-                </LinearLayout>
-
-                <androidx.recyclerview.widget.RecyclerView
-                    android:id="@+id/recyclerViewConversations"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:nestedScrollingEnabled="false" />
-            </LinearLayout>
-
-            <!-- Live Events Section Header -->
+            <!-- Conversations List Header -->
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:orientation="horizontal"
                 android:gravity="center_vertical"
+                android:orientation="horizontal"
                 android:layout_marginBottom="8dp">
 
                 <TextView
                     android:layout_width="0dp"
                     android:layout_height="wrap_content"
                     android:layout_weight="1"
-                    android:text="رویدادهای زنده (تماس‌ها و پیامک‌ها)"
+                    android:text="گفتگوها"
                     android:textColor="@color/white"
-                    android:textStyle="bold"
-                    android:textSize="14sp" />
+                    android:textSize="15sp"
+                    android:textStyle="bold" />
 
                 <TextView
-                    android:id="@+id/tvClearEvents"
+                    android:id="@+id/tvRefreshConversations"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:text="پاکسازی"
-                    android:textColor="@color/text_muted"
+                    android:text="بروزرسانی"
+                    android:textColor="@color/teal_200"
                     android:textSize="12sp"
-                    android:padding="4dp" />
+                    android:padding="6dp" />
             </LinearLayout>
 
+            <!-- RecyclerView Conversations -->
             <androidx.recyclerview.widget.RecyclerView
-                android:id="@+id/recyclerViewEvents"
+                android:id="@+id/recyclerViewConversations"
                 android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:nestedScrollingEnabled="false"
-                android:layout_marginBottom="16dp" />
-
-            <!-- Helpful Setup Card -->
-            <com.google.android.material.card.MaterialCardView
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                app:cardBackgroundColor="#13202E"
-                app:cardCornerRadius="14dp"
-                app:strokeColor="#1F3A56"
-                app:strokeWidth="1dp">
-
-                <LinearLayout
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:orientation="vertical"
-                    android:padding="14dp">
-
-                    <TextView
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:text="💡 راهنمای اتصال سریع:"
-                        android:textColor="#80D8FF"
-                        android:textStyle="bold"
-                        android:textSize="13sp" />
-
-                    <TextView
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:layout_marginTop="4dp"
-                        android:text="۱. هر دو گوشی را ابتدا یک‌بار در بخش بلوتوث اندروید جفت (Pair) کنید.\n۲. در گوشی اول روی دکمه شروع بزنید، در گوشی دوم روی اتصال بزنید.\n۳. با لمس هر مکالمه در لیست، وارد صفحه چت و پاسخ مستقیم به پیامک می‌شوید."
-                        android:textColor="#B0BEC5"
-                        android:lineSpacingExtra="3dp"
-                        android:textSize="12sp" />
-                </LinearLayout>
-            </com.google.android.material.card.MaterialCardView>
+                android:layout_height="match_parent" />
 
         </LinearLayout>
-    </androidx.core.widget.NestedScrollView>
+
+    </FrameLayout>
 
 </androidx.coordinatorlayout.widget.CoordinatorLayout>
