@@ -4,47 +4,107 @@
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:background="@color/bg_dark"
-    android:gravity="center"
+    android:gravity="center_horizontal"
     android:orientation="vertical"
-    android:padding="32dp">
+    android:padding="24dp">
 
-    <TextView
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:text="@string/incoming_call_title"
-        android:textColor="@color/text_muted"
-        android:textSize="16sp" />
+    <!-- Top Spacer -->
+    <Space
+        android:layout_width="match_parent"
+        android:layout_height="40dp" />
+
+    <!-- Caller Avatar Icon -->
+    <FrameLayout
+        android:layout_width="96dp"
+        android:layout_height="96dp"
+        android:background="@drawable/ic_launcher_foreground"
+        android:backgroundTint="@color/teal_700">
+
+        <TextView
+            android:id="@+id/tvCallAvatar"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="center"
+            android:text="👤"
+            android:textSize="40sp" />
+    </FrameLayout>
 
     <TextView
         android:id="@+id/tvCallerNumber"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:layout_marginTop="16dp"
-        android:text="+98 912 ..."
+        android:layout_marginTop="20dp"
+        android:text="نام مخاطب"
         android:textColor="@color/white"
-        android:textSize="28sp"
+        android:textSize="26sp"
         android:textStyle="bold" />
 
     <TextView
         android:id="@+id/tvCallStatus"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:layout_marginTop="8dp"
-        android:text="در حال زنگ خوردن روی گوشی اول..."
+        android:layout_marginTop="6dp"
+        android:text="تماس ورودی مخابراتی (از سیم‌کارت اول)..."
         android:textColor="@color/teal_200"
         android:textSize="14sp" />
 
+    <!-- In-Call Timer -->
+    <TextView
+        android:id="@+id/tvCallTimer"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="4dp"
+        android:text="00:00"
+        android:textColor="@color/text_muted"
+        android:textSize="16sp"
+        android:visibility="gone" />
+
     <Space
         android:layout_width="match_parent"
-        android:layout_height="80dp" />
+        android:layout_height="0dp"
+        android:layout_weight="1" />
 
-    <!-- Action Buttons -->
+    <!-- In-Call Control Buttons (Speaker / Mute) -->
+    <LinearLayout
+        android:id="@+id/layoutCallControls"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:gravity="center"
+        android:orientation="horizontal"
+        android:layout_marginBottom="32dp"
+        android:visibility="gone">
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btnToggleSpeaker"
+            android:layout_width="64dp"
+            android:layout_height="64dp"
+            android:layout_marginEnd="24dp"
+            style="@style/Widget.Material3.Button.TonalButton"
+            app:cornerRadius="32dp"
+            app:icon="@android:drawable/stat_sys_speakerphone"
+            app:iconGravity="textStart"
+            app:iconPadding="0dp" />
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btnToggleMute"
+            android:layout_width="64dp"
+            android:layout_height="64dp"
+            android:layout_marginStart="24dp"
+            style="@style/Widget.Material3.Button.TonalButton"
+            app:cornerRadius="32dp"
+            app:icon="@android:drawable/ic_btn_speak_now"
+            app:iconGravity="textStart"
+            app:iconPadding="0dp" />
+    </LinearLayout>
+
+    <!-- Incoming Call Actions (Answer / Reject) -->
     <LinearLayout
         android:id="@+id/layoutIncomingActions"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:gravity="center"
-        android:orientation="horizontal">
+        android:orientation="horizontal"
+        android:layout_marginBottom="40dp">
 
         <com.google.android.material.button.MaterialButton
             android:id="@+id/btnRejectCall"
@@ -53,7 +113,7 @@
             android:layout_weight="1"
             android:layout_marginEnd="16dp"
             android:backgroundTint="@color/red_call"
-            android:text="@string/reject_call"
+            android:text="رد تماس"
             android:textSize="16sp"
             app:cornerRadius="32dp" />
 
@@ -64,18 +124,19 @@
             android:layout_weight="1"
             android:layout_marginStart="16dp"
             android:backgroundTint="@color/green_call"
-            android:text="@string/answer_call"
+            android:text="پاسخ"
             android:textSize="16sp"
             app:cornerRadius="32dp" />
     </LinearLayout>
 
+    <!-- End Call Button (During Active Call) -->
     <com.google.android.material.button.MaterialButton
         android:id="@+id/btnEndOngoingCall"
         android:layout_width="match_parent"
         android:layout_height="64dp"
-        android:layout_marginTop="24dp"
+        android:layout_marginBottom="40dp"
         android:backgroundTint="@color/red_call"
-        android:text="@string/end_call"
+        android:text="قطع مکالمه"
         android:textSize="16sp"
         android:visibility="gone"
         app:cornerRadius="32dp" />

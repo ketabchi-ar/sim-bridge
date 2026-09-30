@@ -58,6 +58,17 @@ object LocalMessageStore {
     }
 
     @Synchronized
+    fun markConversationAsRead(context: Context, address: String) {
+        init(context)
+        val db = dbHelper?.writableDatabase ?: return
+        val targetNorm = PhoneNumberUtil.normalize(address)
+        val values = ContentValues().apply {
+            put("is_read", 1)
+        }
+        db.update("messages", values, "address = ?", arrayOf(targetNorm))
+    }
+
+    @Synchronized
     fun getConversations(context: Context): List<ChatConversation> {
         init(context)
         val list = mutableListOf<ChatConversation>()
@@ -106,7 +117,6 @@ object LocalMessageStore {
         val targetNorm = PhoneNumberUtil.normalize(address)
         val contactName = SmsRepository.getContactName(context, address)
 
-        // Query all messages and filter by normalized phone matching
         var cursor: Cursor? = null
         try {
             cursor = db.query(

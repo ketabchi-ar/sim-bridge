@@ -42,6 +42,7 @@ class ChatActivity : AppCompatActivity() {
                 )
                 messageAdapter.addMessage(newMsg)
                 binding.recyclerViewMessages.smoothScrollToPosition(messageAdapter.itemCount - 1)
+                LocalMessageStore.markConversationAsRead(this@ChatActivity, contactAddress)
             }
         }
     }
@@ -96,7 +97,13 @@ class ChatActivity : AppCompatActivity() {
             registerReceiver(liveMessageReceiver, filter)
         }
 
+        LocalMessageStore.markConversationAsRead(this, contactAddress)
         loadChatHistory()
+    }
+
+    override fun onResume() {
+        super.onResume()
+        LocalMessageStore.markConversationAsRead(this, contactAddress)
     }
 
     private fun loadChatHistory() {
