@@ -1,5 +1,8 @@
 # SIM Bridge 📱🔁📱
 
+[![DevSponsors](https://img.shields.io/badge/DevSponsors-Verified_OSS-6366f1?style=for-the-badge&logo=github)](https://devsponsors.github.io)
+[![Sponsor](https://img.shields.io/badge/Sponsor-DevSponsors_Hub-emerald?style=for-the-badge&logo=github-sponsors)](https://devsponsors.github.io)
+
 پل ارتباطی هوشمند بین دو گوشی اندرویدی از طریق بلوتوث:
 1. **گوشی اول (Samsung S21 Ultra - سیم‌کارت‌دار)**
 2. **گوشی دوم (Samsung S26 Ultra - بدون سیم‌کارت / رجیستر نشده)**
