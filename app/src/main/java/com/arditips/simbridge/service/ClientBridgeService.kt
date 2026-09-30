@@ -11,16 +11,18 @@ import android.content.ContentValues
 import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
+import android.media.AudioAttributes
 import android.media.Ringtone
 import android.media.RingtoneManager
 import android.net.Uri
 import android.os.Build
 import android.os.IBinder
+import android.os.VibrationEffect
+import android.os.Vibrator
 import android.provider.Telephony
 import androidx.core.app.NotificationCompat
 import com.arditips.simbridge.R
 import com.arditips.simbridge.SimBridgeApp
-import com.arditips.simbridge.audio.LiveAudioRelay
 import com.arditips.simbridge.bluetooth.BluetoothConnection
 import com.arditips.simbridge.bluetooth.BluetoothConstants
 import com.arditips.simbridge.data.LocalMessageStore
@@ -43,8 +45,8 @@ class ClientBridgeService : Service() {
     private val tag = "ClientBridgeService"
     private val isConnecting = AtomicBoolean(false)
     private var activeConnection: BluetoothConnection? = null
-    private var audioRelay: LiveAudioRelay? = null
     private var ringtone: Ringtone? = null
+    private var vibrator: Vibrator? = null
     private val gson = Gson()
 
     companion object {
@@ -53,6 +55,8 @@ class ClientBridgeService : Service() {
 
         const val ACTION_CONNECT = "com.arditips.simbridge.CONNECT_CLIENT"
         const val ACTION_DISCONNECT = "com.arditips.simbridge.DISCONNECT_CLIENT"
+        const val ACTION_ANSWER = "com.arditips.simbridge.ANSWER_FROM_NOTIF"
+        const val ACTION_REJECT = "com.arditips.simbridge.REJECT_FROM_NOTIF"
         const val EXTRA_DEVICE_ADDRESS = "device_address"
 
         const val BROADCAST_EVENT = "com.arditips.simbridge.EVENT"
@@ -61,18 +65,19 @@ class ClientBridgeService : Service() {
         const val EXTRA_MSG_SENDER = "msg_sender"
         const val EXTRA_MSG_BODY = "msg_body"
         const val EXTRA_MSG_TIME = "msg_time"
+        const val INCOMING_CALL_NOTIF_ID = 2001
     }
 
     override fun onCreate() {
         super.onCreate()
         instance = this
-        audioRelay = LiveAudioRelay(this)
         AppLog.i(tag, "ClientBridgeService created")
         try {
             val defaultRingtoneUri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_RINGTONE)
             ringtone = RingtoneManager.getRingtone(applicationContext, defaultRingtoneUri)
+            vibrator = getSystemService(Context.VIBRATOR_SERVICE) as Vibrator
         } catch (e: Exception) {
-            AppLog.e(tag, "Failed to initialize ringtone", e)
+            AppLog.e(tag, "Failed to initialize ringtone/vibrator", e)
         }
     }
 
@@ -100,6 +105,14 @@ class ClientBridgeService : Service() {
                     }
                     connectToGateway(address)
                 }
+            }
+            ACTION_ANSWER -> {
+                answerCall()
+                dismissCallNotification()
+            }
+            ACTION_REJECT -> {
+                rejectCall()
+                dismissCallNotification()
             }
         }
         return START_STICKY
@@ -131,8 +144,7 @@ class ClientBridgeService : Service() {
                     onDisconnected = {
                         AppLog.i(tag, "Disconnected from gateway")
                         updateNotification("ارتباط با میزبان قطع شد")
-                        stopRinging()
-                        audioRelay?.stop()
+                        stopRingingAndVibration()
                     }
                 )
                 activeConnection?.startListening()
@@ -247,7 +259,6 @@ class ClientBridgeService : Service() {
 
     private fun triggerSystemSmsSync() {
         try {
-            // Samsung & SmartSwitch restore shock signals
             val syncIntent = Intent("com.samsung.android.messaging.intent.action.TP_SYNC_FOR_RESTORE_MESSAGE")
             sendBroadcast(syncIntent)
 
@@ -260,15 +271,23 @@ class ClientBridgeService : Service() {
         AppLog.i(tag, "Call state changed: ${call.state}, caller: ${call.callerNumber}")
         when (call.state) {
             "RINGING" -> {
-                startRinging()
                 val callerNumber = call.callerNumber ?: "ناشناس"
                 val callerName = SmsRepository.getContactName(this, callerNumber) ?: callerNumber
-                val intent = Intent(this, IncomingCallActivity::class.java).apply {
-                    flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP
-                    putExtra("CALLER_NUMBER", callerNumber)
-                    putExtra("CALLER_NAME", callerName)
+
+                startRingingAndVibration()
+                showIncomingCallNotification(callerNumber, callerName)
+
+                // Try starting Activity directly as well
+                try {
+                    val intent = Intent(this, IncomingCallActivity::class.java).apply {
+                        flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
+                        putExtra("CALLER_NUMBER", callerNumber)
+                        putExtra("CALLER_NAME", callerName)
+                    }
+                    startActivity(intent)
+                } catch (e: Exception) {
+                    AppLog.w(tag, "Could not start direct call activity: ${e.message}")
                 }
-                startActivity(intent)
 
                 broadcastEvent(
                     BridgeEventItem(
@@ -279,43 +298,87 @@ class ClientBridgeService : Service() {
                 )
             }
             "OFFHOOK" -> {
-                stopRinging()
-                activeConnection?.let { conn ->
-                    audioRelay?.start(conn.getInputStream(), conn.getOutputStream())
-                }
+                stopRingingAndVibration()
+                dismissCallNotification()
             }
             "IDLE" -> {
-                stopRinging()
-                audioRelay?.stop()
+                stopRingingAndVibration()
+                dismissCallNotification()
                 val intent = Intent("com.arditips.simbridge.CALL_ENDED")
                 sendBroadcast(intent)
             }
         }
     }
 
+    private fun showIncomingCallNotification(callerNumber: String, callerName: String) {
+        val fullScreenIntent = Intent(this, IncomingCallActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP
+            putExtra("CALLER_NUMBER", callerNumber)
+            putExtra("CALLER_NAME", callerName)
+        }
+        val fullScreenPendingIntent = PendingIntent.getActivity(
+            this, 201, fullScreenIntent, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+        )
+
+        val answerIntent = Intent(this, ClientBridgeService::class.java).apply {
+            action = ACTION_ANSWER
+        }
+        val answerPendingIntent = PendingIntent.getService(
+            this, 202, answerIntent, PendingIntent.FLAG_IMMUTABLE
+        )
+
+        val rejectIntent = Intent(this, ClientBridgeService::class.java).apply {
+            action = ACTION_REJECT
+        }
+        val rejectPendingIntent = PendingIntent.getService(
+            this, 203, rejectIntent, PendingIntent.FLAG_IMMUTABLE
+        )
+
+        val notif = NotificationCompat.Builder(this, SimBridgeApp.CHANNEL_CALL)
+            .setContentTitle("تماس ورودی مخابراتی")
+            .setContentText(callerName)
+            .setSmallIcon(R.drawable.ic_launcher_foreground)
+            .setPriority(NotificationCompat.PRIORITY_MAX)
+            .setCategory(NotificationCompat.CATEGORY_CALL)
+            .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
+            .setFullScreenIntent(fullScreenPendingIntent, true)
+            .addAction(android.R.drawable.ic_menu_call, "پاسخ", answerPendingIntent)
+            .addAction(android.R.drawable.ic_menu_close_clear_cancel, "رد تماس", rejectPendingIntent)
+            .setOngoing(true)
+            .setAutoCancel(false)
+            .build()
+
+        val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        manager.notify(INCOMING_CALL_NOTIF_ID, notif)
+    }
+
+    private fun dismissCallNotification() {
+        val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        manager.cancel(INCOMING_CALL_NOTIF_ID)
+    }
+
     fun answerCall() {
         AppLog.i(tag, "Answering call")
         val payload = gson.toJson(CallCommand(CallCommand.ACTION_ANSWER))
         activeConnection?.sendPacket(BridgePacket(BridgePacket.TYPE_CALL_CMD, payload))
-        stopRinging()
-        activeConnection?.let { conn ->
-            audioRelay?.start(conn.getInputStream(), conn.getOutputStream())
-        }
+        stopRingingAndVibration()
+        dismissCallNotification()
     }
 
     fun rejectCall() {
         AppLog.i(tag, "Rejecting call")
         val payload = gson.toJson(CallCommand(CallCommand.ACTION_REJECT))
         activeConnection?.sendPacket(BridgePacket(BridgePacket.TYPE_CALL_CMD, payload))
-        stopRinging()
-        audioRelay?.stop()
+        stopRingingAndVibration()
+        dismissCallNotification()
     }
 
     fun endCall() {
         AppLog.i(tag, "Ending call")
         val payload = gson.toJson(CallCommand(CallCommand.ACTION_HANGUP))
         activeConnection?.sendPacket(BridgePacket(BridgePacket.TYPE_CALL_CMD, payload))
-        audioRelay?.stop()
+        stopRingingAndVibration()
+        dismissCallNotification()
     }
 
     fun sendSms(recipient: String, body: String): Boolean {
@@ -376,23 +439,31 @@ class ClientBridgeService : Service() {
         return success
     }
 
-    private fun startRinging() {
+    private fun startRingingAndVibration() {
         try {
             if (ringtone?.isPlaying == false) {
                 ringtone?.play()
             }
+            val pattern = longArrayOf(0, 1000, 1000, 1000)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                vibrator?.vibrate(VibrationEffect.createWaveform(pattern, 0))
+            } else {
+                @Suppress("DEPRECATION")
+                vibrator?.vibrate(pattern, 0)
+            }
         } catch (e: Exception) {
-            AppLog.e(tag, "Error playing ringtone", e)
+            AppLog.e(tag, "Error playing ringtone/vibration", e)
         }
     }
 
-    private fun stopRinging() {
+    private fun stopRingingAndVibration() {
         try {
             if (ringtone?.isPlaying == true) {
                 ringtone?.stop()
             }
+            vibrator?.cancel()
         } catch (e: Exception) {
-            AppLog.e(tag, "Error stopping ringtone", e)
+            AppLog.e(tag, "Error stopping ringtone/vibration", e)
         }
     }
 
@@ -405,8 +476,8 @@ class ClientBridgeService : Service() {
 
     private fun disconnect() {
         activeConnection?.close()
-        audioRelay?.stop()
-        stopRinging()
+        stopRingingAndVibration()
+        dismissCallNotification()
     }
 
     private fun buildNotification(text: String): Notification {

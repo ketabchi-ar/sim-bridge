@@ -17,7 +17,6 @@ import android.telephony.SmsManager
 import androidx.core.app.NotificationCompat
 import com.arditips.simbridge.R
 import com.arditips.simbridge.SimBridgeApp
-import com.arditips.simbridge.audio.LiveAudioRelay
 import com.arditips.simbridge.bluetooth.BluetoothConnection
 import com.arditips.simbridge.bluetooth.BluetoothConstants
 import com.arditips.simbridge.model.BridgePacket
@@ -27,6 +26,7 @@ import com.arditips.simbridge.model.SmsData
 import com.arditips.simbridge.model.SmsSendRequest
 import com.arditips.simbridge.ui.MainActivity
 import com.arditips.simbridge.util.AppLog
+import com.arditips.simbridge.util.PhoneNumberUtil
 import com.google.gson.Gson
 import java.util.concurrent.atomic.AtomicBoolean
 
@@ -36,7 +36,6 @@ class GatewayBridgeService : Service() {
     private val isRunning = AtomicBoolean(false)
     private var serverSocket: BluetoothServerSocket? = null
     private var activeConnection: BluetoothConnection? = null
-    private var audioRelay: LiveAudioRelay? = null
     private val gson = Gson()
 
     companion object {
@@ -58,7 +57,6 @@ class GatewayBridgeService : Service() {
     override fun onCreate() {
         super.onCreate()
         instance = this
-        audioRelay = LiveAudioRelay(this)
         AppLog.i(tag, "GatewayBridgeService created")
     }
 
@@ -121,7 +119,6 @@ class GatewayBridgeService : Service() {
                         onDisconnected = {
                             AppLog.i(tag, "Client disconnected")
                             updateNotification("سرور میزبان فعال - ارتباط با کلاینت قطع شد")
-                            audioRelay?.stop()
                         }
                     )
                     activeConnection?.startListening()
@@ -160,15 +157,7 @@ class GatewayBridgeService : Service() {
         val payload = gson.toJson(CallStateData(state, callerNumber))
         val packet = BridgePacket(BridgePacket.TYPE_CALL_STATE, payload)
         activeConnection?.sendPacket(packet)
-        AppLog.i(tag, "Call state $state relayed to client")
-
-        if (state == "OFFHOOK" && activeConnection != null) {
-            activeConnection?.let { conn ->
-                audioRelay?.start(conn.getInputStream(), conn.getOutputStream())
-            }
-        } else if (state == "IDLE") {
-            audioRelay?.stop()
-        }
+        AppLog.i(tag, "Call state $state relayed to client for $callerNumber")
     }
 
     @SuppressLint("MissingPermission")
@@ -196,14 +185,15 @@ class GatewayBridgeService : Service() {
 
     private fun sendOutgoingSms(recipient: String, body: String) {
         try {
+            val normalized = PhoneNumberUtil.normalize(recipient)
             val smsManager = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
                 getSystemService(SmsManager::class.java)
             } else {
                 @Suppress("DEPRECATION")
                 SmsManager.getDefault()
             }
-            smsManager.sendTextMessage(recipient, null, body, null, null)
-            AppLog.i(tag, "Relayed SMS sent to $recipient")
+            smsManager.sendTextMessage(normalized, null, body, null, null)
+            AppLog.i(tag, "Relayed SMS sent to $normalized")
         } catch (e: Exception) {
             AppLog.e(tag, "Failed to send relayed SMS", e)
         }
@@ -214,7 +204,6 @@ class GatewayBridgeService : Service() {
         try {
             activeConnection?.close()
             serverSocket?.close()
-            audioRelay?.stop()
         } catch (e: Exception) {
             AppLog.e(tag, "Error stopping server", e)
         }
