@@ -7,13 +7,16 @@ import android.app.PendingIntent
 import android.app.Service
 import android.bluetooth.BluetoothAdapter
 import android.bluetooth.BluetoothManager
+import android.content.ContentValues
 import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.media.Ringtone
 import android.media.RingtoneManager
+import android.net.Uri
 import android.os.Build
 import android.os.IBinder
+import android.provider.Telephony
 import androidx.core.app.NotificationCompat
 import com.arditips.simbridge.R
 import com.arditips.simbridge.SimBridgeApp
@@ -151,6 +154,11 @@ class ClientBridgeService : Service() {
 
     private fun onSmsReceived(sms: SmsData) {
         AppLog.i(tag, "SMS received from ${sms.sender}")
+
+        // 1. Write directly to Android Native SMS Inbox
+        writeSmsToInbox(sms.sender, sms.body, sms.timestamp)
+
+        // 2. Post High-Priority Notification
         val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         val intent = Intent(this, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
@@ -169,12 +177,29 @@ class ClientBridgeService : Service() {
 
         manager.notify(System.currentTimeMillis().toInt(), notif)
 
+        // 3. Broadcast to SimBridge UI
         val event = BridgeEventItem(
             type = "SMS",
             title = "پیامک از ${sms.sender}",
             detail = sms.body
         )
         broadcastEvent(event)
+    }
+
+    private fun writeSmsToInbox(sender: String, body: String, timestamp: Long) {
+        try {
+            val values = ContentValues().apply {
+                put(Telephony.Sms.ADDRESS, sender)
+                put(Telephony.Sms.BODY, body)
+                put(Telephony.Sms.DATE, timestamp)
+                put(Telephony.Sms.READ, 0)
+                put(Telephony.Sms.TYPE, Telephony.Sms.MESSAGE_TYPE_INBOX)
+            }
+            val uri = contentResolver.insert(Telephony.Sms.Inbox.CONTENT_URI, values)
+            AppLog.i(tag, "SMS written to native inbox URI: $uri")
+        } catch (e: Exception) {
+            AppLog.e(tag, "Failed to write SMS to native inbox: ${e.message}", e)
+        }
     }
 
     private fun onCallStateChanged(call: CallStateData) {
@@ -241,6 +266,21 @@ class ClientBridgeService : Service() {
         val success = activeConnection?.sendPacket(BridgePacket(BridgePacket.TYPE_SMS_SEND_REQ, payload)) ?: false
         if (success) {
             AppLog.i(tag, "Outgoing SMS sent to $recipient")
+
+            // Write to native Sent SMS box
+            try {
+                val values = ContentValues().apply {
+                    put(Telephony.Sms.ADDRESS, recipient)
+                    put(Telephony.Sms.BODY, body)
+                    put(Telephony.Sms.DATE, System.currentTimeMillis())
+                    put(Telephony.Sms.READ, 1)
+                    put(Telephony.Sms.TYPE, Telephony.Sms.MESSAGE_TYPE_SENT)
+                }
+                contentResolver.insert(Telephony.Sms.Sent.CONTENT_URI, values)
+            } catch (e: Exception) {
+                AppLog.e(tag, "Failed to save sent SMS to native db", e)
+            }
+
             broadcastEvent(
                 BridgeEventItem(
                     type = "SMS_SENT",

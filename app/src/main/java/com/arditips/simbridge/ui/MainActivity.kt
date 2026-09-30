@@ -2,6 +2,7 @@ package com.arditips.simbridge.ui
 
 import android.Manifest
 import android.annotation.SuppressLint
+import android.app.role.RoleManager
 import android.bluetooth.BluetoothAdapter
 import android.bluetooth.BluetoothManager
 import android.content.BroadcastReceiver
@@ -11,9 +12,9 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.content.pm.PackageManager
-import android.graphics.Color
 import android.os.Build
 import android.os.Bundle
+import android.provider.Telephony
 import android.view.View
 import android.widget.ScrollView
 import android.widget.TextView
@@ -64,6 +65,15 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    private val roleManagerLauncher = registerForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        if (isDefaultSmsApp()) {
+            Toast.makeText(this, "SIM Bridge به عنوان برنامه پیامک پیش‌فرض تنظیم شد ✓", Toast.LENGTH_LONG).show()
+            updateModeUi()
+        }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         try {
@@ -87,6 +97,11 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    override fun onResume() {
+        super.onResume()
+        updateModeUi()
+    }
+
     private fun setupRecyclerView() {
         binding.recyclerViewEvents.layoutManager = LinearLayoutManager(this)
         binding.recyclerViewEvents.adapter = eventAdapter
@@ -104,11 +119,37 @@ class MainActivity : AppCompatActivity() {
         updateModeUi()
     }
 
+    private fun isDefaultSmsApp(): Boolean {
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            val roleManager = getSystemService(RoleManager::class.java)
+            roleManager.isRoleHeld(RoleManager.ROLE_SMS)
+        } else {
+            Telephony.Sms.getDefaultSmsPackage(this) == packageName
+        }
+    }
+
+    private fun requestDefaultSmsRole() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            val roleManager = getSystemService(RoleManager::class.java)
+            if (roleManager.isRoleAvailable(RoleManager.ROLE_SMS)) {
+                val intent = roleManager.createRequestRoleIntent(RoleManager.ROLE_SMS)
+                roleManagerLauncher.launch(intent)
+            }
+        } else {
+            @Suppress("DEPRECATION")
+            val intent = Intent(Telephony.Sms.Intents.ACTION_CHANGE_DEFAULT).apply {
+                putExtra(Telephony.Sms.Intents.EXTRA_PACKAGE_NAME, packageName)
+            }
+            startActivity(intent)
+        }
+    }
+
     private fun updateModeUi() {
         if (isGatewayMode) {
             binding.tvStatusTitle.text = "گوشی ۱ (میزبان سیم‌کارت)"
             binding.btnSelectDevice.visibility = View.GONE
             binding.cardSendSms.visibility = View.GONE
+            binding.cardDefaultSmsBanner.visibility = View.GONE
 
             val isRunning = GatewayBridgeService.instance != null
             if (isRunning) {
@@ -124,6 +165,9 @@ class MainActivity : AppCompatActivity() {
             binding.tvStatusTitle.text = "گوشی ۲ (کلاینت بدون سیم‌کارت)"
             binding.btnSelectDevice.visibility = View.VISIBLE
             binding.cardSendSms.visibility = View.VISIBLE
+
+            // Show default SMS banner if not set
+            binding.cardDefaultSmsBanner.visibility = if (isDefaultSmsApp()) View.GONE else View.VISIBLE
 
             val isRunning = ClientBridgeService.instance != null
             if (isRunning) {
@@ -143,6 +187,10 @@ class MainActivity : AppCompatActivity() {
     private fun setupActions() {
         binding.btnViewLogs.setOnClickListener {
             showLogsDialog()
+        }
+
+        binding.btnSetDefaultSms.setOnClickListener {
+            requestDefaultSmsRole()
         }
 
         binding.tvClearEvents.setOnClickListener {
