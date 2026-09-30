@@ -8,8 +8,8 @@ import android.media.AudioManager
 import android.media.AudioRecord
 import android.media.AudioTrack
 import android.media.MediaRecorder
-import android.util.Log
 import com.arditips.simbridge.bluetooth.BluetoothConstants
+import com.arditips.simbridge.util.AppLog
 import java.io.InputStream
 import java.io.OutputStream
 import java.util.concurrent.atomic.AtomicBoolean
@@ -33,20 +33,30 @@ class LiveAudioRelay(private val context: Context) {
     fun start(inputStream: InputStream, outputStream: OutputStream) {
         if (isRunning.getAndSet(true)) return
 
+        AppLog.i(tag, "Starting low-latency voice relay session")
         val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
-        audioManager.mode = AudioManager.MODE_IN_COMMUNICATION
-        audioManager.isSpeakerphoneOn = true
-
-        val minRecordBuf = AudioRecord.getMinBufferSize(sampleRate, channelIn, encoding)
-        val minPlayBuf = AudioTrack.getMinBufferSize(sampleRate, channelOut, encoding)
 
         try {
+            audioManager.mode = AudioManager.MODE_IN_COMMUNICATION
+            audioManager.isSpeakerphoneOn = true
+
+            // Trigger Bluetooth SCO if available
+            try {
+                if (audioManager.isBluetoothScoAvailableOffCall) {
+                    audioManager.startBluetoothSco()
+                    audioManager.isBluetoothScoOn = true
+                }
+            } catch (_: Exception) {}
+
+            val minRecordBuf = AudioRecord.getMinBufferSize(sampleRate, channelIn, encoding)
+            val minPlayBuf = AudioTrack.getMinBufferSize(sampleRate, channelOut, encoding)
+
             audioRecord = AudioRecord(
                 MediaRecorder.AudioSource.VOICE_COMMUNICATION,
                 sampleRate,
                 channelIn,
                 encoding,
-                maxOf(minRecordBuf, 4096)
+                maxOf(minRecordBuf, 2048)
             )
 
             audioTrack = AudioTrack.Builder()
@@ -63,56 +73,64 @@ class LiveAudioRelay(private val context: Context) {
                         .setChannelMask(channelOut)
                         .build()
                 )
-                .setBufferSizeInBytes(maxOf(minPlayBuf, 4096))
+                .setBufferSizeInBytes(maxOf(minPlayBuf, 2048))
                 .setTransferMode(AudioTrack.MODE_STREAM)
                 .build()
 
             audioRecord?.startRecording()
             audioTrack?.play()
+            AppLog.i(tag, "Audio record & play pipelines active")
         } catch (e: Exception) {
-            Log.e(tag, "Error initializing audio record/track", e)
+            AppLog.e(tag, "Error starting voice pipeline", e)
             stop()
             return
         }
 
-        // Recording & Sending Thread
+        // Fast streaming thread (Mic -> Output Socket)
         recordThread = Thread {
-            val buffer = ByteArray(2048)
+            val buffer = ByteArray(640) // 20ms chunk at 16kHz
             while (isRunning.get()) {
-                val readBytes = audioRecord?.read(buffer, 0, buffer.size) ?: -1
-                if (readBytes > 0) {
+                val read = audioRecord?.read(buffer, 0, buffer.size) ?: -1
+                if (read > 0) {
                     try {
-                        outputStream.write(buffer, 0, readBytes)
+                        outputStream.write(buffer, 0, read)
                         outputStream.flush()
                     } catch (e: Exception) {
-                        Log.e(tag, "Audio record send failed", e)
+                        AppLog.d(tag, "Record socket send finished")
                         break
                     }
                 }
             }
-        }.apply { start() }
+        }.apply {
+            priority = Thread.MAX_PRIORITY
+            start()
+        }
 
-        // Receiving & Playing Thread
+        // Fast playing thread (Input Socket -> Speaker)
         playThread = Thread {
-            val buffer = ByteArray(2048)
+            val buffer = ByteArray(640)
             while (isRunning.get()) {
                 try {
-                    val readBytes = inputStream.read(buffer)
-                    if (readBytes > 0) {
-                        audioTrack?.write(buffer, 0, readBytes)
-                    } else if (readBytes < 0) {
+                    val read = inputStream.read(buffer)
+                    if (read > 0) {
+                        audioTrack?.write(buffer, 0, read)
+                    } else if (read < 0) {
                         break
                     }
                 } catch (e: Exception) {
-                    Log.e(tag, "Audio play receive failed", e)
+                    AppLog.d(tag, "Play socket read finished")
                     break
                 }
             }
-        }.apply { start() }
+        }.apply {
+            priority = Thread.MAX_PRIORITY
+            start()
+        }
     }
 
     fun stop() {
         if (!isRunning.getAndSet(false)) return
+        AppLog.i(tag, "Stopping voice relay session")
 
         try {
             recordThread?.interrupt()
@@ -127,9 +145,15 @@ class LiveAudioRelay(private val context: Context) {
             audioTrack = null
 
             val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
+            try {
+                if (audioManager.isBluetoothScoOn) {
+                    audioManager.isBluetoothScoOn = false
+                    audioManager.stopBluetoothSco()
+                }
+            } catch (_: Exception) {}
             audioManager.mode = AudioManager.MODE_NORMAL
         } catch (e: Exception) {
-            Log.e(tag, "Error stopping audio relay", e)
+            AppLog.e(tag, "Error stopping audio relay", e)
         }
     }
 }

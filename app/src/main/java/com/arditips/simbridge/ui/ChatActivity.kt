@@ -5,6 +5,7 @@ import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.LinearLayoutManager
+import com.arditips.simbridge.data.LocalMessageStore
 import com.arditips.simbridge.data.SmsRepository
 import com.arditips.simbridge.databinding.ActivityChatBinding
 import com.arditips.simbridge.model.ChatMessage
@@ -25,7 +26,9 @@ class ChatActivity : AppCompatActivity() {
         setContentView(binding.root)
 
         contactAddress = intent.getStringExtra(EXTRA_CONTACT) ?: ""
-        binding.toolbarChat.title = contactAddress
+        val contactName = SmsRepository.getContactName(this, contactAddress) ?: contactAddress
+        binding.toolbarChat.title = contactName
+        binding.toolbarChat.subtitle = if (contactName != contactAddress) contactAddress else null
         binding.toolbarChat.setNavigationOnClickListener { finish() }
 
         binding.recyclerViewMessages.layoutManager = LinearLayoutManager(this).apply {
@@ -48,6 +51,7 @@ class ChatActivity : AppCompatActivity() {
                 binding.etChatReply.setText("")
                 val newMsg = ChatMessage(
                     sender = contactAddress,
+                    senderName = contactName,
                     body = text,
                     timestamp = System.currentTimeMillis(),
                     isOutgoing = true

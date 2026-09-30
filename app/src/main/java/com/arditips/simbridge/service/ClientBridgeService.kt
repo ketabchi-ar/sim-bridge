@@ -23,6 +23,8 @@ import com.arditips.simbridge.SimBridgeApp
 import com.arditips.simbridge.audio.LiveAudioRelay
 import com.arditips.simbridge.bluetooth.BluetoothConnection
 import com.arditips.simbridge.bluetooth.BluetoothConstants
+import com.arditips.simbridge.data.LocalMessageStore
+import com.arditips.simbridge.data.SmsRepository
 import com.arditips.simbridge.model.BridgeEventItem
 import com.arditips.simbridge.model.BridgePacket
 import com.arditips.simbridge.model.CallCommand
@@ -155,10 +157,20 @@ class ClientBridgeService : Service() {
     private fun onSmsReceived(sms: SmsData) {
         AppLog.i(tag, "SMS received from ${sms.sender}")
 
-        // 1. Write directly to Android Native SMS Inbox with thread_id & status
+        // 1. Save directly into Local App Database
+        LocalMessageStore.saveMessage(
+            context = this,
+            address = sms.sender,
+            body = sms.body,
+            timestamp = sms.timestamp,
+            isOutgoing = false
+        )
+
+        // 2. Write to Android Native SMS Inbox
         writeSmsToInbox(sms.sender, sms.body, sms.timestamp)
 
-        // 2. Post High-Priority Notification
+        // 3. Post High-Priority Notification with Contact Name
+        val contactName = SmsRepository.getContactName(this, sms.sender) ?: sms.sender
         val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         val intent = Intent(this, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
@@ -166,7 +178,7 @@ class ClientBridgeService : Service() {
         val pendingIntent = PendingIntent.getActivity(this, 0, intent, PendingIntent.FLAG_IMMUTABLE)
 
         val notif = NotificationCompat.Builder(this, SimBridgeApp.CHANNEL_SMS)
-            .setContentTitle("پیامک از: ${sms.sender}")
+            .setContentTitle("پیامک از: $contactName")
             .setContentText(sms.body)
             .setStyle(NotificationCompat.BigTextStyle().bigText(sms.body))
             .setSmallIcon(R.drawable.ic_launcher_foreground)
@@ -177,10 +189,10 @@ class ClientBridgeService : Service() {
 
         manager.notify(System.currentTimeMillis().toInt(), notif)
 
-        // 3. Broadcast to SimBridge UI
+        // 4. Broadcast to SimBridge UI
         val event = BridgeEventItem(
             type = "SMS",
-            title = "پیامک از ${sms.sender}",
+            title = contactName,
             detail = sms.body
         )
         broadcastEvent(event)
@@ -188,11 +200,9 @@ class ClientBridgeService : Service() {
 
     private fun writeSmsToInbox(sender: String, body: String, timestamp: Long) {
         try {
-            // Get or create conversation thread ID
             val threadId = try {
                 Telephony.Threads.getOrCreateThreadId(this, sender)
             } catch (e: Exception) {
-                AppLog.w(tag, "Could not get threadId: ${e.message}")
                 0L
             }
 
@@ -211,9 +221,6 @@ class ClientBridgeService : Service() {
             }
 
             val uri = contentResolver.insert(Telephony.Sms.Inbox.CONTENT_URI, values)
-            AppLog.i(tag, "SMS written to native inbox URI: $uri with threadId: $threadId")
-
-            // Broadcast notify change for SMS provider to update external apps (Google Messages / Samsung Messages)
             uri?.let {
                 contentResolver.notifyChange(it, null)
                 contentResolver.notifyChange(Telephony.Sms.CONTENT_URI, null)
@@ -228,9 +235,11 @@ class ClientBridgeService : Service() {
         when (call.state) {
             "RINGING" -> {
                 startRinging()
+                val callerName = call.callerNumber?.let { SmsRepository.getContactName(this, it) } ?: call.callerNumber ?: "ناشناس"
                 val intent = Intent(this, IncomingCallActivity::class.java).apply {
                     flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP
                     putExtra("CALLER_NUMBER", call.callerNumber ?: "ناشناس")
+                    putExtra("CALLER_NAME", callerName)
                 }
                 startActivity(intent)
 
@@ -238,7 +247,7 @@ class ClientBridgeService : Service() {
                     BridgeEventItem(
                         type = "CALL",
                         title = "تماس ورودی",
-                        detail = "از شماره: ${call.callerNumber ?: "ناشناس"}"
+                        detail = "از: $callerName"
                     )
                 )
             }
@@ -286,9 +295,19 @@ class ClientBridgeService : Service() {
         val payload = gson.toJson(SmsSendRequest(recipient, body))
         val success = activeConnection?.sendPacket(BridgePacket(BridgePacket.TYPE_SMS_SEND_REQ, payload)) ?: false
         if (success) {
+            val now = System.currentTimeMillis()
             AppLog.i(tag, "Outgoing SMS sent to $recipient")
 
-            // Write to native Sent SMS box
+            // 1. Save locally in App Database
+            LocalMessageStore.saveMessage(
+                context = this,
+                address = recipient,
+                body = body,
+                timestamp = now,
+                isOutgoing = true
+            )
+
+            // 2. Save in native database
             try {
                 val threadId = try {
                     Telephony.Threads.getOrCreateThreadId(this, recipient)
@@ -297,7 +316,7 @@ class ClientBridgeService : Service() {
                 val values = ContentValues().apply {
                     put(Telephony.Sms.ADDRESS, recipient)
                     put(Telephony.Sms.BODY, body)
-                    put(Telephony.Sms.DATE, System.currentTimeMillis())
+                    put(Telephony.Sms.DATE, now)
                     put(Telephony.Sms.READ, 1)
                     put(Telephony.Sms.SEEN, 1)
                     put(Telephony.Sms.TYPE, Telephony.Sms.MESSAGE_TYPE_SENT)
@@ -314,10 +333,11 @@ class ClientBridgeService : Service() {
                 AppLog.e(tag, "Failed to save sent SMS to native db", e)
             }
 
+            val contactName = SmsRepository.getContactName(this, recipient) ?: recipient
             broadcastEvent(
                 BridgeEventItem(
                     type = "SMS_SENT",
-                    title = "پیامک ارسالی به $recipient",
+                    title = "پیامک ارسالی به $contactName",
                     detail = body
                 )
             )

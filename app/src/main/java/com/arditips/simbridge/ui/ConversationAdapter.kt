@@ -16,7 +16,7 @@ class ConversationAdapter(
 ) : RecyclerView.Adapter<ConversationAdapter.ConversationViewHolder>() {
 
     private val items = mutableListOf<ChatConversation>()
-    private val timeFormat = SimpleDateFormat("yyyy/MM/dd HH:mm", Locale.getDefault())
+    private val timeFormat = SimpleDateFormat("HH:mm", Locale.getDefault())
 
     fun setConversations(newItems: List<ChatConversation>) {
         items.clear()
@@ -40,14 +40,27 @@ class ConversationAdapter(
     override fun getItemCount(): Int = items.size
 
     class ConversationViewHolder(itemView: View) : RecyclerView.ViewHolder(itemView) {
+        private val tvAvatar: TextView = itemView.findViewById(R.id.tvAvatarLetter)
         private val tvContact: TextView = itemView.findViewById(R.id.tvConversationContact)
         private val tvTime: TextView = itemView.findViewById(R.id.tvConversationTime)
         private val tvLastMessage: TextView = itemView.findViewById(R.id.tvConversationLastMessage)
+        private val tvUnread: TextView = itemView.findViewById(R.id.tvUnreadBadge)
 
         fun bind(item: ChatConversation, timeFormat: SimpleDateFormat) {
-            tvContact.text = item.contact
+            val displayName = item.contactName ?: item.contact
+            tvContact.text = displayName
             tvTime.text = timeFormat.format(Date(item.timestamp))
             tvLastMessage.text = item.lastMessage
+
+            val letter = if (displayName.isNotEmpty()) displayName.take(1).uppercase() else "#"
+            tvAvatar.text = letter
+
+            if (item.unreadCount > 0) {
+                tvUnread.visibility = View.VISIBLE
+                tvUnread.text = item.unreadCount.toString()
+            } else {
+                tvUnread.visibility = View.GONE
+            }
         }
     }
 }
