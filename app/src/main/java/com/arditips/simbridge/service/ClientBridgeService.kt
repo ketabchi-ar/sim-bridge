@@ -155,7 +155,7 @@ class ClientBridgeService : Service() {
     private fun onSmsReceived(sms: SmsData) {
         AppLog.i(tag, "SMS received from ${sms.sender}")
 
-        // 1. Write directly to Android Native SMS Inbox
+        // 1. Write directly to Android Native SMS Inbox with thread_id & status
         writeSmsToInbox(sms.sender, sms.body, sms.timestamp)
 
         // 2. Post High-Priority Notification
@@ -188,15 +188,36 @@ class ClientBridgeService : Service() {
 
     private fun writeSmsToInbox(sender: String, body: String, timestamp: Long) {
         try {
+            // Get or create conversation thread ID
+            val threadId = try {
+                Telephony.Threads.getOrCreateThreadId(this, sender)
+            } catch (e: Exception) {
+                AppLog.w(tag, "Could not get threadId: ${e.message}")
+                0L
+            }
+
             val values = ContentValues().apply {
                 put(Telephony.Sms.ADDRESS, sender)
                 put(Telephony.Sms.BODY, body)
                 put(Telephony.Sms.DATE, timestamp)
+                put(Telephony.Sms.DATE_SENT, timestamp)
                 put(Telephony.Sms.READ, 0)
+                put(Telephony.Sms.SEEN, 0)
+                put(Telephony.Sms.STATUS, Telephony.Sms.STATUS_NONE)
                 put(Telephony.Sms.TYPE, Telephony.Sms.MESSAGE_TYPE_INBOX)
+                if (threadId > 0) {
+                    put(Telephony.Sms.THREAD_ID, threadId)
+                }
             }
+
             val uri = contentResolver.insert(Telephony.Sms.Inbox.CONTENT_URI, values)
-            AppLog.i(tag, "SMS written to native inbox URI: $uri")
+            AppLog.i(tag, "SMS written to native inbox URI: $uri with threadId: $threadId")
+
+            // Broadcast notify change for SMS provider to update external apps (Google Messages / Samsung Messages)
+            uri?.let {
+                contentResolver.notifyChange(it, null)
+                contentResolver.notifyChange(Telephony.Sms.CONTENT_URI, null)
+            }
         } catch (e: Exception) {
             AppLog.e(tag, "Failed to write SMS to native inbox: ${e.message}", e)
         }
@@ -269,14 +290,26 @@ class ClientBridgeService : Service() {
 
             // Write to native Sent SMS box
             try {
+                val threadId = try {
+                    Telephony.Threads.getOrCreateThreadId(this, recipient)
+                } catch (_: Exception) { 0L }
+
                 val values = ContentValues().apply {
                     put(Telephony.Sms.ADDRESS, recipient)
                     put(Telephony.Sms.BODY, body)
                     put(Telephony.Sms.DATE, System.currentTimeMillis())
                     put(Telephony.Sms.READ, 1)
+                    put(Telephony.Sms.SEEN, 1)
                     put(Telephony.Sms.TYPE, Telephony.Sms.MESSAGE_TYPE_SENT)
+                    if (threadId > 0) {
+                        put(Telephony.Sms.THREAD_ID, threadId)
+                    }
                 }
-                contentResolver.insert(Telephony.Sms.Sent.CONTENT_URI, values)
+                val uri = contentResolver.insert(Telephony.Sms.Sent.CONTENT_URI, values)
+                uri?.let {
+                    contentResolver.notifyChange(it, null)
+                    contentResolver.notifyChange(Telephony.Sms.CONTENT_URI, null)
+                }
             } catch (e: Exception) {
                 AppLog.e(tag, "Failed to save sent SMS to native db", e)
             }
