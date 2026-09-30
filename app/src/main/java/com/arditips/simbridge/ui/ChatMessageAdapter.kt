@@ -1,11 +1,16 @@
 package com.arditips.simbridge.ui
 
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
+import android.text.util.Linkify
 import android.view.Gravity
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
 import android.widget.LinearLayout
 import android.widget.TextView
+import android.widget.Toast
 import androidx.core.content.ContextCompat
 import androidx.recyclerview.widget.RecyclerView
 import com.arditips.simbridge.R
@@ -51,6 +56,19 @@ class ChatMessageAdapter : RecyclerView.Adapter<ChatMessageAdapter.MessageViewHo
         fun bind(message: ChatMessage, timeFormat: SimpleDateFormat) {
             tvBody.text = message.body
             tvTime.text = timeFormat.format(Date(message.timestamp))
+
+            // Enable selectable text and auto clickable links (web, phone, etc.)
+            tvBody.setTextIsSelectable(true)
+            Linkify.addLinks(tvBody, Linkify.WEB_URLS or Linkify.PHONE_NUMBERS)
+
+            // Long click to copy full text to clipboard
+            card.setOnLongClickListener {
+                val clipboard = itemView.context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                val clip = ClipData.newPlainText("Message Text", message.body)
+                clipboard.setPrimaryClip(clip)
+                Toast.makeText(itemView.context, "متن پیام کپی شد", Toast.LENGTH_SHORT).show()
+                true
+            }
 
             val context = itemView.context
             if (message.isOutgoing) {

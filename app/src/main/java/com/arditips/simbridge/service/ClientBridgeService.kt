@@ -33,6 +33,7 @@ import com.arditips.simbridge.model.CallCommand
 import com.arditips.simbridge.model.CallStateData
 import com.arditips.simbridge.model.SmsData
 import com.arditips.simbridge.model.SmsSendRequest
+import com.arditips.simbridge.ui.ChatActivity
 import com.arditips.simbridge.ui.IncomingCallActivity
 import com.arditips.simbridge.ui.MainActivity
 import com.arditips.simbridge.util.AppLog
@@ -188,13 +189,19 @@ class ClientBridgeService : Service() {
         writeSmsToInbox(normalizedSender, sms.body, sms.timestamp)
         triggerSystemSmsSync()
 
-        // 3. Post High-Priority Notification with Contact Name
+        // 3. Post High-Priority Notification that opens directly into ChatActivity
         val contactName = SmsRepository.getContactName(this, normalizedSender) ?: normalizedSender
         val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-        val intent = Intent(this, MainActivity::class.java).apply {
+        val intent = Intent(this, ChatActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+            putExtra(ChatActivity.EXTRA_CONTACT, normalizedSender)
         }
-        val pendingIntent = PendingIntent.getActivity(this, 0, intent, PendingIntent.FLAG_IMMUTABLE)
+        val pendingIntent = PendingIntent.getActivity(
+            this,
+            normalizedSender.hashCode(),
+            intent,
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+        )
 
         val notif = NotificationCompat.Builder(this, SimBridgeApp.CHANNEL_SMS)
             .setContentTitle("پیامک از: $contactName")
@@ -206,7 +213,7 @@ class ClientBridgeService : Service() {
             .setPriority(NotificationCompat.PRIORITY_HIGH)
             .build()
 
-        manager.notify(System.currentTimeMillis().toInt(), notif)
+        manager.notify(normalizedSender.hashCode(), notif)
 
         // 4. Broadcast live update to SimBridge Chat & Main Activity
         val event = BridgeEventItem(
@@ -277,7 +284,6 @@ class ClientBridgeService : Service() {
                 startRingingAndVibration()
                 showIncomingCallNotification(callerNumber, callerName)
 
-                // Try starting Activity directly as well
                 try {
                     val intent = Intent(this, IncomingCallActivity::class.java).apply {
                         flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
