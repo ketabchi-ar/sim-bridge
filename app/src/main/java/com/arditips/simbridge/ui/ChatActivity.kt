@@ -1,5 +1,10 @@
 package com.arditips.simbridge.ui
 
+import android.content.BroadcastReceiver
+import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
+import android.os.Build
 import android.os.Bundle
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
@@ -10,6 +15,7 @@ import com.arditips.simbridge.data.SmsRepository
 import com.arditips.simbridge.databinding.ActivityChatBinding
 import com.arditips.simbridge.model.ChatMessage
 import com.arditips.simbridge.service.ClientBridgeService
+import com.arditips.simbridge.util.PhoneNumberUtil
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -19,6 +25,26 @@ class ChatActivity : AppCompatActivity() {
     private lateinit var binding: ActivityChatBinding
     private val messageAdapter = ChatMessageAdapter()
     private var contactAddress: String = ""
+
+    private val liveMessageReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            val sender = intent?.getStringExtra(ClientBridgeService.EXTRA_MSG_SENDER) ?: return
+            val body = intent.getStringExtra(ClientBridgeService.EXTRA_MSG_BODY) ?: ""
+            val time = intent.getLongExtra(ClientBridgeService.EXTRA_MSG_TIME, System.currentTimeMillis())
+
+            if (PhoneNumberUtil.isSame(sender, contactAddress)) {
+                val newMsg = ChatMessage(
+                    sender = sender,
+                    senderName = binding.toolbarChat.title.toString(),
+                    body = body,
+                    timestamp = time,
+                    isOutgoing = false
+                )
+                messageAdapter.addMessage(newMsg)
+                binding.recyclerViewMessages.smoothScrollToPosition(messageAdapter.itemCount - 1)
+            }
+        }
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -57,10 +83,17 @@ class ChatActivity : AppCompatActivity() {
                     isOutgoing = true
                 )
                 messageAdapter.addMessage(newMsg)
-                binding.recyclerViewMessages.scrollToPosition(messageAdapter.itemCount - 1)
+                binding.recyclerViewMessages.smoothScrollToPosition(messageAdapter.itemCount - 1)
             } else {
                 Toast.makeText(this, "خطا در ارسال پیام", Toast.LENGTH_SHORT).show()
             }
+        }
+
+        val filter = IntentFilter(ClientBridgeService.BROADCAST_NEW_MESSAGE)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            registerReceiver(liveMessageReceiver, filter, Context.RECEIVER_NOT_EXPORTED)
+        } else {
+            registerReceiver(liveMessageReceiver, filter)
         }
 
         loadChatHistory()
@@ -76,6 +109,13 @@ class ChatActivity : AppCompatActivity() {
                 }
             }
         }
+    }
+
+    override fun onDestroy() {
+        try {
+            unregisterReceiver(liveMessageReceiver)
+        } catch (_: Exception) {}
+        super.onDestroy()
     }
 
     companion object {

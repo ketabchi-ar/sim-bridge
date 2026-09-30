@@ -33,31 +33,35 @@ class LiveAudioRelay(private val context: Context) {
     fun start(inputStream: InputStream, outputStream: OutputStream) {
         if (isRunning.getAndSet(true)) return
 
-        AppLog.i(tag, "Starting low-latency voice relay session")
+        AppLog.i(tag, "Starting dual-path live voice relay session")
         val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
 
         try {
             audioManager.mode = AudioManager.MODE_IN_COMMUNICATION
             audioManager.isSpeakerphoneOn = true
 
-            // Trigger Bluetooth SCO if available
-            try {
-                if (audioManager.isBluetoothScoAvailableOffCall) {
-                    audioManager.startBluetoothSco()
-                    audioManager.isBluetoothScoOn = true
-                }
-            } catch (_: Exception) {}
-
             val minRecordBuf = AudioRecord.getMinBufferSize(sampleRate, channelIn, encoding)
             val minPlayBuf = AudioTrack.getMinBufferSize(sampleRate, channelOut, encoding)
 
-            audioRecord = AudioRecord(
-                MediaRecorder.AudioSource.VOICE_COMMUNICATION,
-                sampleRate,
-                channelIn,
-                encoding,
-                maxOf(minRecordBuf, 2048)
-            )
+            // In Android 14/15/16, fallback chain: VOICE_COMMUNICATION -> MIC
+            audioRecord = try {
+                AudioRecord(
+                    MediaRecorder.AudioSource.VOICE_COMMUNICATION,
+                    sampleRate,
+                    channelIn,
+                    encoding,
+                    maxOf(minRecordBuf, 2048)
+                )
+            } catch (e: Exception) {
+                AppLog.w(tag, "VOICE_COMMUNICATION source failed, falling back to MIC")
+                AudioRecord(
+                    MediaRecorder.AudioSource.MIC,
+                    sampleRate,
+                    channelIn,
+                    encoding,
+                    maxOf(minRecordBuf, 2048)
+                )
+            }
 
             audioTrack = AudioTrack.Builder()
                 .setAudioAttributes(
@@ -79,16 +83,16 @@ class LiveAudioRelay(private val context: Context) {
 
             audioRecord?.startRecording()
             audioTrack?.play()
-            AppLog.i(tag, "Audio record & play pipelines active")
+            AppLog.i(tag, "Voice record & play pipelines successfully active")
         } catch (e: Exception) {
             AppLog.e(tag, "Error starting voice pipeline", e)
             stop()
             return
         }
 
-        // Fast streaming thread (Mic -> Output Socket)
+        // Fast streaming thread (Mic -> Remote)
         recordThread = Thread {
-            val buffer = ByteArray(640) // 20ms chunk at 16kHz
+            val buffer = ByteArray(640)
             while (isRunning.get()) {
                 val read = audioRecord?.read(buffer, 0, buffer.size) ?: -1
                 if (read > 0) {
@@ -96,7 +100,6 @@ class LiveAudioRelay(private val context: Context) {
                         outputStream.write(buffer, 0, read)
                         outputStream.flush()
                     } catch (e: Exception) {
-                        AppLog.d(tag, "Record socket send finished")
                         break
                     }
                 }
@@ -106,7 +109,7 @@ class LiveAudioRelay(private val context: Context) {
             start()
         }
 
-        // Fast playing thread (Input Socket -> Speaker)
+        // Fast playback thread (Remote -> Speaker)
         playThread = Thread {
             val buffer = ByteArray(640)
             while (isRunning.get()) {
@@ -118,7 +121,6 @@ class LiveAudioRelay(private val context: Context) {
                         break
                     }
                 } catch (e: Exception) {
-                    AppLog.d(tag, "Play socket read finished")
                     break
                 }
             }
@@ -145,12 +147,6 @@ class LiveAudioRelay(private val context: Context) {
             audioTrack = null
 
             val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
-            try {
-                if (audioManager.isBluetoothScoOn) {
-                    audioManager.isBluetoothScoOn = false
-                    audioManager.stopBluetoothSco()
-                }
-            } catch (_: Exception) {}
             audioManager.mode = AudioManager.MODE_NORMAL
         } catch (e: Exception) {
             AppLog.e(tag, "Error stopping audio relay", e)

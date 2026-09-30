@@ -34,6 +34,7 @@ import com.arditips.simbridge.model.SmsSendRequest
 import com.arditips.simbridge.ui.IncomingCallActivity
 import com.arditips.simbridge.ui.MainActivity
 import com.arditips.simbridge.util.AppLog
+import com.arditips.simbridge.util.PhoneNumberUtil
 import com.google.gson.Gson
 import java.util.concurrent.atomic.AtomicBoolean
 
@@ -55,7 +56,11 @@ class ClientBridgeService : Service() {
         const val EXTRA_DEVICE_ADDRESS = "device_address"
 
         const val BROADCAST_EVENT = "com.arditips.simbridge.EVENT"
+        const val BROADCAST_NEW_MESSAGE = "com.arditips.simbridge.NEW_MESSAGE"
         const val EXTRA_EVENT_JSON = "event_json"
+        const val EXTRA_MSG_SENDER = "msg_sender"
+        const val EXTRA_MSG_BODY = "msg_body"
+        const val EXTRA_MSG_TIME = "msg_time"
     }
 
     override fun onCreate() {
@@ -155,22 +160,24 @@ class ClientBridgeService : Service() {
     }
 
     private fun onSmsReceived(sms: SmsData) {
-        AppLog.i(tag, "SMS received from ${sms.sender}")
+        val normalizedSender = PhoneNumberUtil.normalize(sms.sender)
+        AppLog.i(tag, "SMS received from $normalizedSender")
 
         // 1. Save directly into Local App Database
         LocalMessageStore.saveMessage(
             context = this,
-            address = sms.sender,
+            address = normalizedSender,
             body = sms.body,
             timestamp = sms.timestamp,
             isOutgoing = false
         )
 
-        // 2. Write to Android Native SMS Inbox
-        writeSmsToInbox(sms.sender, sms.body, sms.timestamp)
+        // 2. Write to Android Native SMS Inbox & trigger sync
+        writeSmsToInbox(normalizedSender, sms.body, sms.timestamp)
+        triggerSystemSmsSync()
 
         // 3. Post High-Priority Notification with Contact Name
-        val contactName = SmsRepository.getContactName(this, sms.sender) ?: sms.sender
+        val contactName = SmsRepository.getContactName(this, normalizedSender) ?: normalizedSender
         val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         val intent = Intent(this, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
@@ -189,13 +196,20 @@ class ClientBridgeService : Service() {
 
         manager.notify(System.currentTimeMillis().toInt(), notif)
 
-        // 4. Broadcast to SimBridge UI
+        // 4. Broadcast live update to SimBridge Chat & Main Activity
         val event = BridgeEventItem(
             type = "SMS",
             title = contactName,
             detail = sms.body
         )
         broadcastEvent(event)
+
+        val chatIntent = Intent(BROADCAST_NEW_MESSAGE).apply {
+            putExtra(EXTRA_MSG_SENDER, normalizedSender)
+            putExtra(EXTRA_MSG_BODY, sms.body)
+            putExtra(EXTRA_MSG_TIME, sms.timestamp)
+        }
+        sendBroadcast(chatIntent)
     }
 
     private fun writeSmsToInbox(sender: String, body: String, timestamp: Long) {
@@ -224,10 +238,22 @@ class ClientBridgeService : Service() {
             uri?.let {
                 contentResolver.notifyChange(it, null)
                 contentResolver.notifyChange(Telephony.Sms.CONTENT_URI, null)
+                contentResolver.notifyChange(Uri.parse("content://mms-sms/conversations"), null)
             }
         } catch (e: Exception) {
             AppLog.e(tag, "Failed to write SMS to native inbox: ${e.message}", e)
         }
+    }
+
+    private fun triggerSystemSmsSync() {
+        try {
+            // Samsung & SmartSwitch restore shock signals
+            val syncIntent = Intent("com.samsung.android.messaging.intent.action.TP_SYNC_FOR_RESTORE_MESSAGE")
+            sendBroadcast(syncIntent)
+
+            val finishIntent = Intent("com.samsung.android.messaging.intent.action.FINISH_RESTORE_MESSAGE")
+            sendBroadcast(finishIntent)
+        } catch (_: Exception) {}
     }
 
     private fun onCallStateChanged(call: CallStateData) {
@@ -235,10 +261,11 @@ class ClientBridgeService : Service() {
         when (call.state) {
             "RINGING" -> {
                 startRinging()
-                val callerName = call.callerNumber?.let { SmsRepository.getContactName(this, it) } ?: call.callerNumber ?: "ناشناس"
+                val callerNumber = call.callerNumber ?: "ناشناس"
+                val callerName = SmsRepository.getContactName(this, callerNumber) ?: callerNumber
                 val intent = Intent(this, IncomingCallActivity::class.java).apply {
                     flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP
-                    putExtra("CALLER_NUMBER", call.callerNumber ?: "ناشناس")
+                    putExtra("CALLER_NUMBER", callerNumber)
                     putExtra("CALLER_NAME", callerName)
                 }
                 startActivity(intent)
@@ -292,16 +319,17 @@ class ClientBridgeService : Service() {
     }
 
     fun sendSms(recipient: String, body: String): Boolean {
-        val payload = gson.toJson(SmsSendRequest(recipient, body))
+        val normalized = PhoneNumberUtil.normalize(recipient)
+        val payload = gson.toJson(SmsSendRequest(normalized, body))
         val success = activeConnection?.sendPacket(BridgePacket(BridgePacket.TYPE_SMS_SEND_REQ, payload)) ?: false
         if (success) {
             val now = System.currentTimeMillis()
-            AppLog.i(tag, "Outgoing SMS sent to $recipient")
+            AppLog.i(tag, "Outgoing SMS sent to $normalized")
 
             // 1. Save locally in App Database
             LocalMessageStore.saveMessage(
                 context = this,
-                address = recipient,
+                address = normalized,
                 body = body,
                 timestamp = now,
                 isOutgoing = true
@@ -310,11 +338,11 @@ class ClientBridgeService : Service() {
             // 2. Save in native database
             try {
                 val threadId = try {
-                    Telephony.Threads.getOrCreateThreadId(this, recipient)
+                    Telephony.Threads.getOrCreateThreadId(this, normalized)
                 } catch (_: Exception) { 0L }
 
                 val values = ContentValues().apply {
-                    put(Telephony.Sms.ADDRESS, recipient)
+                    put(Telephony.Sms.ADDRESS, normalized)
                     put(Telephony.Sms.BODY, body)
                     put(Telephony.Sms.DATE, now)
                     put(Telephony.Sms.READ, 1)
@@ -328,12 +356,13 @@ class ClientBridgeService : Service() {
                 uri?.let {
                     contentResolver.notifyChange(it, null)
                     contentResolver.notifyChange(Telephony.Sms.CONTENT_URI, null)
+                    contentResolver.notifyChange(Uri.parse("content://mms-sms/conversations"), null)
                 }
             } catch (e: Exception) {
                 AppLog.e(tag, "Failed to save sent SMS to native db", e)
             }
 
-            val contactName = SmsRepository.getContactName(this, recipient) ?: recipient
+            val contactName = SmsRepository.getContactName(this, normalized) ?: normalized
             broadcastEvent(
                 BridgeEventItem(
                     type = "SMS_SENT",
@@ -342,7 +371,7 @@ class ClientBridgeService : Service() {
                 )
             )
         } else {
-            AppLog.w(tag, "Failed to send outgoing SMS to $recipient (not connected?)")
+            AppLog.w(tag, "Failed to send outgoing SMS to $normalized (not connected?)")
         }
         return success
     }
