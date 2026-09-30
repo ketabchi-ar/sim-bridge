@@ -2,7 +2,6 @@ package com.arditips.simbridge.ui
 
 import android.Manifest
 import android.annotation.SuppressLint
-import android.app.role.RoleManager
 import android.bluetooth.BluetoothAdapter
 import android.bluetooth.BluetoothManager
 import android.content.BroadcastReceiver
@@ -14,7 +13,6 @@ import android.content.IntentFilter
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
-import android.provider.Telephony
 import android.view.View
 import android.widget.ScrollView
 import android.widget.TextView
@@ -23,15 +21,21 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.LinearLayoutManager
 import com.arditips.simbridge.R
+import com.arditips.simbridge.data.SmsRepository
 import com.arditips.simbridge.databinding.ActivityMainBinding
 import com.arditips.simbridge.model.BridgeEventItem
+import com.arditips.simbridge.model.ChatConversation
 import com.arditips.simbridge.service.ClientBridgeService
 import com.arditips.simbridge.service.GatewayBridgeService
 import com.arditips.simbridge.util.AppLog
 import com.google.android.material.tabs.TabLayout
 import com.google.gson.Gson
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 class MainActivity : AppCompatActivity() {
 
@@ -41,12 +45,17 @@ class MainActivity : AppCompatActivity() {
     private val gson = Gson()
     private var isGatewayMode = true
 
+    private lateinit var conversationAdapter: ConversationAdapter
+
     private val eventReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
             val json = intent?.getStringExtra(ClientBridgeService.EXTRA_EVENT_JSON) ?: return
             try {
                 val item = gson.fromJson(json, BridgeEventItem::class.java)
                 eventAdapter.addEvent(item)
+                if (item.type == "SMS" || item.type == "SMS_SENT") {
+                    loadConversations()
+                }
             } catch (e: Exception) {
                 AppLog.e(tag, "Failed to parse event JSON", e)
             }
@@ -60,17 +69,9 @@ class MainActivity : AppCompatActivity() {
         if (allGranted) {
             AppLog.i(tag, "All permissions granted by user")
             Toast.makeText(this, "دسترسی‌ها با موفقیت تایید شدند ✓", Toast.LENGTH_SHORT).show()
+            loadConversations()
         } else {
             AppLog.w(tag, "Some permissions were denied: $results")
-        }
-    }
-
-    private val roleManagerLauncher = registerForActivityResult(
-        ActivityResultContracts.StartActivityForResult()
-    ) { result ->
-        if (isDefaultSmsApp()) {
-            Toast.makeText(this, "SIM Bridge به عنوان برنامه پیامک پیش‌فرض تنظیم شد ✓", Toast.LENGTH_LONG).show()
-            updateModeUi()
         }
     }
 
@@ -100,11 +101,23 @@ class MainActivity : AppCompatActivity() {
     override fun onResume() {
         super.onResume()
         updateModeUi()
+        if (!isGatewayMode) {
+            loadConversations()
+        }
     }
 
     private fun setupRecyclerView() {
         binding.recyclerViewEvents.layoutManager = LinearLayoutManager(this)
         binding.recyclerViewEvents.adapter = eventAdapter
+
+        conversationAdapter = ConversationAdapter { conversation ->
+            val intent = Intent(this, ChatActivity::class.java).apply {
+                putExtra(ChatActivity.EXTRA_CONTACT, conversation.contact)
+            }
+            startActivity(intent)
+        }
+        binding.recyclerViewConversations.layoutManager = LinearLayoutManager(this)
+        binding.recyclerViewConversations.adapter = conversationAdapter
     }
 
     private fun setupTabs() {
@@ -112,6 +125,9 @@ class MainActivity : AppCompatActivity() {
             override fun onTabSelected(tab: TabLayout.Tab?) {
                 isGatewayMode = tab?.position == 0
                 updateModeUi()
+                if (!isGatewayMode) {
+                    loadConversations()
+                }
             }
             override fun onTabUnselected(tab: TabLayout.Tab?) {}
             override fun onTabReselected(tab: TabLayout.Tab?) {}
@@ -119,28 +135,12 @@ class MainActivity : AppCompatActivity() {
         updateModeUi()
     }
 
-    private fun isDefaultSmsApp(): Boolean {
-        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            val roleManager = getSystemService(RoleManager::class.java)
-            roleManager.isRoleHeld(RoleManager.ROLE_SMS)
-        } else {
-            Telephony.Sms.getDefaultSmsPackage(this) == packageName
-        }
-    }
-
-    private fun requestDefaultSmsRole() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            val roleManager = getSystemService(RoleManager::class.java)
-            if (roleManager.isRoleAvailable(RoleManager.ROLE_SMS)) {
-                val intent = roleManager.createRequestRoleIntent(RoleManager.ROLE_SMS)
-                roleManagerLauncher.launch(intent)
+    private fun loadConversations() {
+        lifecycleScope.launch(Dispatchers.IO) {
+            val list = SmsRepository.loadConversations(this@MainActivity)
+            withContext(Dispatchers.Main) {
+                conversationAdapter.setConversations(list)
             }
-        } else {
-            @Suppress("DEPRECATION")
-            val intent = Intent(Telephony.Sms.Intents.ACTION_CHANGE_DEFAULT).apply {
-                putExtra(Telephony.Sms.Intents.EXTRA_PACKAGE_NAME, packageName)
-            }
-            startActivity(intent)
         }
     }
 
@@ -149,7 +149,7 @@ class MainActivity : AppCompatActivity() {
             binding.tvStatusTitle.text = "گوشی ۱ (میزبان سیم‌کارت)"
             binding.btnSelectDevice.visibility = View.GONE
             binding.cardSendSms.visibility = View.GONE
-            binding.cardDefaultSmsBanner.visibility = View.GONE
+            binding.layoutConversationsSection.visibility = View.GONE
 
             val isRunning = GatewayBridgeService.instance != null
             if (isRunning) {
@@ -165,9 +165,7 @@ class MainActivity : AppCompatActivity() {
             binding.tvStatusTitle.text = "گوشی ۲ (کلاینت بدون سیم‌کارت)"
             binding.btnSelectDevice.visibility = View.VISIBLE
             binding.cardSendSms.visibility = View.VISIBLE
-
-            // Show default SMS banner if not set
-            binding.cardDefaultSmsBanner.visibility = if (isDefaultSmsApp()) View.GONE else View.VISIBLE
+            binding.layoutConversationsSection.visibility = View.VISIBLE
 
             val isRunning = ClientBridgeService.instance != null
             if (isRunning) {
@@ -189,8 +187,9 @@ class MainActivity : AppCompatActivity() {
             showLogsDialog()
         }
 
-        binding.btnSetDefaultSms.setOnClickListener {
-            requestDefaultSmsRole()
+        binding.tvRefreshConversations.setOnClickListener {
+            loadConversations()
+            Toast.makeText(this, "پیام‌ها بروزرسانی شدند", Toast.LENGTH_SHORT).show()
         }
 
         binding.tvClearEvents.setOnClickListener {
@@ -244,6 +243,7 @@ class MainActivity : AppCompatActivity() {
                 if (ok) {
                     binding.etMessageBody.setText("")
                     Toast.makeText(this, "پیام برای ارسال به سیم‌کارت اول منتقل شد ✓", Toast.LENGTH_SHORT).show()
+                    binding.root.postDelayed({ loadConversations() }, 500)
                 } else {
                     Toast.makeText(this, "ارسال ناموفق بود - وضعیت اتصال را چک کنید", Toast.LENGTH_SHORT).show()
                 }

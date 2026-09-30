@@ -65,6 +65,12 @@
         </activity>
 
         <activity
+            android:name=".ui.ChatActivity"
+            android:exported="false"
+            android:windowSoftInputMode="adjustResize"
+            android:theme="@style/Theme.SimBridge" />
+
+        <activity
             android:name=".ui.IncomingCallActivity"
             android:exported="false"
             android:showOnLockScreen="true"
