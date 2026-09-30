@@ -33,16 +33,18 @@ class ChatActivity : AppCompatActivity() {
             val time = intent.getLongExtra(ClientBridgeService.EXTRA_MSG_TIME, System.currentTimeMillis())
 
             if (PhoneNumberUtil.isSame(sender, contactAddress)) {
-                val newMsg = ChatMessage(
-                    sender = sender,
-                    senderName = binding.toolbarChat.title.toString(),
-                    body = body,
-                    timestamp = time,
-                    isOutgoing = false
-                )
-                messageAdapter.addMessage(newMsg)
-                binding.recyclerViewMessages.smoothScrollToPosition(messageAdapter.itemCount - 1)
-                LocalMessageStore.markConversationAsRead(this@ChatActivity, contactAddress)
+                runOnUiThread {
+                    val newMsg = ChatMessage(
+                        sender = sender,
+                        senderName = binding.toolbarChat.title.toString(),
+                        body = body,
+                        timestamp = time,
+                        isOutgoing = false
+                    )
+                    messageAdapter.addMessage(newMsg)
+                    binding.recyclerViewMessages.smoothScrollToPosition(messageAdapter.itemCount - 1)
+                    LocalMessageStore.markConversationAsRead(this@ChatActivity, contactAddress)
+                }
             }
         }
     }
@@ -92,7 +94,7 @@ class ChatActivity : AppCompatActivity() {
 
         val filter = IntentFilter(ClientBridgeService.BROADCAST_NEW_MESSAGE)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            registerReceiver(liveMessageReceiver, filter, Context.RECEIVER_NOT_EXPORTED)
+            registerReceiver(liveMessageReceiver, filter, Context.RECEIVER_EXPORTED)
         } else {
             registerReceiver(liveMessageReceiver, filter)
         }

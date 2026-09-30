@@ -224,6 +224,7 @@ class ClientBridgeService : Service() {
         broadcastEvent(event)
 
         val chatIntent = Intent(BROADCAST_NEW_MESSAGE).apply {
+            setPackage(packageName)
             putExtra(EXTRA_MSG_SENDER, normalizedSender)
             putExtra(EXTRA_MSG_BODY, sms.body)
             putExtra(EXTRA_MSG_TIME, sms.timestamp)
