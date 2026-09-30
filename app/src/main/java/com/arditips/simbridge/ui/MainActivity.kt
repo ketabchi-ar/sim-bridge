@@ -196,6 +196,7 @@ class MainActivity : AppCompatActivity() {
                     binding.btnToggleService.text = "انتخاب و اتصال سریع به گوشی ۱"
                     binding.btnSelectDevice.visibility = View.VISIBLE
                 }
+                binding.btnTetheringSettings.text = "🌐 اتصال به اینترنت بلوتوثی گوشی ۱"
             }
             2 -> {
                 // Dedicated Messages Tab
@@ -253,16 +254,24 @@ class MainActivity : AppCompatActivity() {
 
         binding.btnTetheringSettings.setOnClickListener {
             try {
-                val intent = Intent().apply {
-                    action = "android.settings.TETHER_SETTINGS"
+                if (currentTab == 0) {
+                    // Host / Gateway Phone: Open Tethering settings (to share Internet)
+                    val intent = Intent().apply {
+                        action = "android.settings.TETHER_SETTINGS"
+                    }
+                    startActivity(intent)
+                } else {
+                    // Client Phone (No SIM): Open Bluetooth paired devices settings (to connect to Internet Access profile)
+                    val intent = Intent(android.provider.Settings.ACTION_BLUETOOTH_SETTINGS)
+                    startActivity(intent)
+                    Toast.makeText(this, "روی نام گوشی ۱ بزنید و تیک «Internet access» را فعال کنید", Toast.LENGTH_LONG).show()
                 }
-                startActivity(intent)
             } catch (e: Exception) {
                 try {
                     val intent = Intent(android.provider.Settings.ACTION_WIRELESS_SETTINGS)
                     startActivity(intent)
                 } catch (e2: Exception) {
-                    Toast.makeText(this, "امکان باز کردن تنظیمات تترینگ میسر نشد", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(this, "امکان باز کردن تنظیمات میسر نشد", Toast.LENGTH_SHORT).show()
                 }
             }
         }
