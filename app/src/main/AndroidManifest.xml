@@ -30,8 +30,6 @@
     <uses-permission android:name="android.permission.WAKE_LOCK" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE" />
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_PHONE_CALL" />
 
     <application
         android:name=".SimBridgeApp"
@@ -60,18 +58,23 @@
             android:launchMode="singleTop"
             android:theme="@style/Theme.SimBridge.Call" />
 
+        <activity
+            android:name=".ui.CrashActivity"
+            android:exported="false"
+            android:theme="@style/Theme.SimBridge" />
+
         <!-- Foreground Bridge Services -->
         <service
             android:name=".service.GatewayBridgeService"
             android:enabled="true"
             android:exported="false"
-            android:foregroundServiceType="connectedDevice|phoneCall|microphone" />
+            android:foregroundServiceType="connectedDevice" />
 
         <service
             android:name=".service.ClientBridgeService"
             android:enabled="true"
             android:exported="false"
-            android:foregroundServiceType="connectedDevice|phoneCall|microphone" />
+            android:foregroundServiceType="connectedDevice" />
 
         <!-- SMS Broadcast Receiver on Gateway -->
         <receiver

@@ -9,11 +9,11 @@ import android.bluetooth.BluetoothManager
 import android.bluetooth.BluetoothServerSocket
 import android.content.Context
 import android.content.Intent
+import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.IBinder
 import android.telecom.TelecomManager
 import android.telephony.SmsManager
-import android.util.Log
 import androidx.core.app.NotificationCompat
 import com.arditips.simbridge.R
 import com.arditips.simbridge.SimBridgeApp
@@ -26,6 +26,7 @@ import com.arditips.simbridge.model.CallStateData
 import com.arditips.simbridge.model.SmsData
 import com.arditips.simbridge.model.SmsSendRequest
 import com.arditips.simbridge.ui.MainActivity
+import com.arditips.simbridge.util.AppLog
 import com.google.gson.Gson
 import java.util.concurrent.atomic.AtomicBoolean
 
@@ -58,19 +59,30 @@ class GatewayBridgeService : Service() {
         super.onCreate()
         instance = this
         audioRelay = LiveAudioRelay(this)
+        AppLog.i(tag, "GatewayBridgeService created")
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
             ACTION_STOP -> {
+                AppLog.i(tag, "Stopping GatewayBridgeService")
                 stopServer()
                 stopForeground(STOP_FOREGROUND_REMOVE)
                 stopSelf()
                 return START_NOT_STICKY
             }
             else -> {
-                startForeground(1001, buildNotification("سرور میزبان فعال - در انتظار اتصال گوشی دوم..."))
-                startServer()
+                try {
+                    val notif = buildNotification("سرور میزبان فعال - در انتظار اتصال گوشی دوم...")
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                        startForeground(1001, notif, ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE)
+                    } else {
+                        startForeground(1001, notif)
+                    }
+                    startServer()
+                } catch (e: Exception) {
+                    AppLog.e(tag, "Failed to start foreground gateway service", e)
+                }
             }
         }
         return START_STICKY
@@ -80,8 +92,13 @@ class GatewayBridgeService : Service() {
     private fun startServer() {
         if (isRunning.getAndSet(true)) return
 
-        val btManager = getSystemService(Context.BLUETOOTH_SERVICE) as BluetoothManager
-        val adapter = btManager.adapter
+        val btManager = getSystemService(Context.BLUETOOTH_SERVICE) as? BluetoothManager
+        val adapter = btManager?.adapter
+        if (adapter == null || !adapter.isEnabled) {
+            AppLog.e(tag, "Bluetooth adapter is disabled or unavailable")
+            isRunning.set(false)
+            return
+        }
 
         Thread {
             try {
@@ -89,19 +106,20 @@ class GatewayBridgeService : Service() {
                     BluetoothConstants.SERVICE_NAME,
                     BluetoothConstants.DATA_UUID
                 )
-                Log.d(tag, "Gateway server socket listening...")
+                AppLog.i(tag, "Gateway server socket listening...")
 
                 while (isRunning.get()) {
                     val socket = serverSocket?.accept() ?: break
-                    Log.d(tag, "Client connected: ${socket.remoteDevice.name}")
+                    val deviceName = try { socket.remoteDevice.name ?: socket.remoteDevice.address } catch (_: Exception) { "Client" }
+                    AppLog.i(tag, "Client connected: $deviceName")
 
-                    updateNotification("متصل به گوشی دوم (${socket.remoteDevice.name ?: "Client"})")
+                    updateNotification("متصل به گوشی دوم ($deviceName)")
 
                     activeConnection = BluetoothConnection(
                         socket = socket,
                         onPacketReceived = { packet -> handleClientPacket(packet) },
                         onDisconnected = {
-                            Log.d(tag, "Client disconnected")
+                            AppLog.i(tag, "Client disconnected")
                             updateNotification("سرور میزبان فعال - ارتباط با کلاینت قطع شد")
                             audioRelay?.stop()
                         }
@@ -109,12 +127,13 @@ class GatewayBridgeService : Service() {
                     activeConnection?.startListening()
                 }
             } catch (e: Exception) {
-                Log.e(tag, "Server socket error", e)
+                AppLog.e(tag, "Server socket error", e)
             }
         }.start()
     }
 
     private fun handleClientPacket(packet: BridgePacket) {
+        AppLog.d(tag, "Packet received from client: ${packet.type}")
         when (packet.type) {
             BridgePacket.TYPE_SMS_SEND_REQ -> {
                 val req = gson.fromJson(packet.payload, SmsSendRequest::class.java)
@@ -134,15 +153,16 @@ class GatewayBridgeService : Service() {
         val payload = gson.toJson(SmsData(sender, body))
         val packet = BridgePacket(BridgePacket.TYPE_SMS_RECEIVED, payload)
         activeConnection?.sendPacket(packet)
+        AppLog.i(tag, "SMS sent to client: from $sender")
     }
 
     private fun sendCallStateToClient(state: String, callerNumber: String?) {
         val payload = gson.toJson(CallStateData(state, callerNumber))
         val packet = BridgePacket(BridgePacket.TYPE_CALL_STATE, payload)
         activeConnection?.sendPacket(packet)
+        AppLog.i(tag, "Call state $state relayed to client")
 
         if (state == "OFFHOOK" && activeConnection != null) {
-            // Call answered: start audio relay
             activeConnection?.let { conn ->
                 audioRelay?.start(conn.getInputStream(), conn.getOutputStream())
             }
@@ -153,22 +173,24 @@ class GatewayBridgeService : Service() {
 
     @SuppressLint("MissingPermission")
     private fun handleCallCommand(action: String) {
-        val telecomManager = getSystemService(Context.TELECOM_SERVICE) as TelecomManager
+        val telecomManager = getSystemService(Context.TELECOM_SERVICE) as? TelecomManager
         try {
             when (action) {
                 CallCommand.ACTION_ANSWER -> {
                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                        telecomManager.acceptRingingCall()
+                        telecomManager?.acceptRingingCall()
+                        AppLog.i(tag, "Call answered via TelecomManager")
                     }
                 }
                 CallCommand.ACTION_REJECT, CallCommand.ACTION_HANGUP -> {
                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-                        telecomManager.endCall()
+                        telecomManager?.endCall()
+                        AppLog.i(tag, "Call ended via TelecomManager")
                     }
                 }
             }
         } catch (e: Exception) {
-            Log.e(tag, "Failed to execute call command: $action", e)
+            AppLog.e(tag, "Failed to execute call command: $action", e)
         }
     }
 
@@ -181,9 +203,9 @@ class GatewayBridgeService : Service() {
                 SmsManager.getDefault()
             }
             smsManager.sendTextMessage(recipient, null, body, null, null)
-            Log.d(tag, "Relayed SMS sent to $recipient")
+            AppLog.i(tag, "Relayed SMS sent to $recipient")
         } catch (e: Exception) {
-            Log.e(tag, "Failed to send relayed SMS", e)
+            AppLog.e(tag, "Failed to send relayed SMS", e)
         }
     }
 
@@ -194,7 +216,7 @@ class GatewayBridgeService : Service() {
             serverSocket?.close()
             audioRelay?.stop()
         } catch (e: Exception) {
-            Log.e(tag, "Error stopping server", e)
+            AppLog.e(tag, "Error stopping server", e)
         }
     }
 
@@ -215,13 +237,16 @@ class GatewayBridgeService : Service() {
     }
 
     private fun updateNotification(text: String) {
-        val manager = getSystemService(Context.NOTIFICATION_SERVICE) as android.app.NotificationManager
-        manager.notify(1001, buildNotification(text))
+        try {
+            val manager = getSystemService(Context.NOTIFICATION_SERVICE) as android.app.NotificationManager
+            manager.notify(1001, buildNotification(text))
+        } catch (_: Exception) {}
     }
 
     override fun onDestroy() {
         stopServer()
         instance = null
+        AppLog.i(tag, "GatewayBridgeService destroyed")
         super.onDestroy()
     }
 

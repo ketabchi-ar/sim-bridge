@@ -9,10 +9,11 @@ import android.bluetooth.BluetoothAdapter
 import android.bluetooth.BluetoothManager
 import android.content.Context
 import android.content.Intent
+import android.content.pm.ServiceInfo
 import android.media.Ringtone
 import android.media.RingtoneManager
+import android.os.Build
 import android.os.IBinder
-import android.util.Log
 import androidx.core.app.NotificationCompat
 import com.arditips.simbridge.R
 import com.arditips.simbridge.SimBridgeApp
@@ -27,6 +28,7 @@ import com.arditips.simbridge.model.SmsData
 import com.arditips.simbridge.model.SmsSendRequest
 import com.arditips.simbridge.ui.IncomingCallActivity
 import com.arditips.simbridge.ui.MainActivity
+import com.arditips.simbridge.util.AppLog
 import com.google.gson.Gson
 import java.util.concurrent.atomic.AtomicBoolean
 
@@ -47,7 +49,6 @@ class ClientBridgeService : Service() {
         const val ACTION_DISCONNECT = "com.arditips.simbridge.DISCONNECT_CLIENT"
         const val EXTRA_DEVICE_ADDRESS = "device_address"
 
-        // Broadcast actions for UI
         const val BROADCAST_EVENT = "com.arditips.simbridge.EVENT"
         const val EXTRA_EVENT_JSON = "event_json"
     }
@@ -56,13 +57,19 @@ class ClientBridgeService : Service() {
         super.onCreate()
         instance = this
         audioRelay = LiveAudioRelay(this)
-        val defaultRingtoneUri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_RINGTONE)
-        ringtone = RingtoneManager.getRingtone(applicationContext, defaultRingtoneUri)
+        AppLog.i(tag, "ClientBridgeService created")
+        try {
+            val defaultRingtoneUri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_RINGTONE)
+            ringtone = RingtoneManager.getRingtone(applicationContext, defaultRingtoneUri)
+        } catch (e: Exception) {
+            AppLog.e(tag, "Failed to initialize ringtone", e)
+        }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
             ACTION_DISCONNECT -> {
+                AppLog.i(tag, "Disconnecting ClientBridgeService")
                 disconnect()
                 stopForeground(STOP_FOREGROUND_REMOVE)
                 stopSelf()
@@ -71,7 +78,16 @@ class ClientBridgeService : Service() {
             ACTION_CONNECT -> {
                 val address = intent.getStringExtra(EXTRA_DEVICE_ADDRESS)
                 if (address != null) {
-                    startForeground(1002, buildNotification("در حال اتصال به میزبان..."))
+                    try {
+                        val notif = buildNotification("در حال اتصال به میزبان...")
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                            startForeground(1002, notif, ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE)
+                        } else {
+                            startForeground(1002, notif)
+                        }
+                    } catch (e: Exception) {
+                        AppLog.e(tag, "Failed to start foreground client service", e)
+                    }
                     connectToGateway(address)
                 }
             }
@@ -85,19 +101,25 @@ class ClientBridgeService : Service() {
 
         Thread {
             try {
-                val btManager = getSystemService(Context.BLUETOOTH_SERVICE) as BluetoothManager
-                val device = btManager.adapter.getRemoteDevice(deviceAddress)
+                val btManager = getSystemService(Context.BLUETOOTH_SERVICE) as? BluetoothManager
+                val adapter = btManager?.adapter
+                if (adapter == null) {
+                    AppLog.e(tag, "Bluetooth adapter not available")
+                    return@Thread
+                }
+                val device = adapter.getRemoteDevice(deviceAddress)
                 val socket = device.createRfcommSocketToServiceRecord(BluetoothConstants.DATA_UUID)
 
+                AppLog.i(tag, "Connecting socket to ${device.name ?: deviceAddress}...")
                 socket.connect()
-                Log.d(tag, "Connected to Gateway: ${device.name}")
+                AppLog.i(tag, "Connected to Gateway: ${device.name}")
                 updateNotification("متصل به میزبان (${device.name ?: deviceAddress}) ✓")
 
                 activeConnection = BluetoothConnection(
                     socket = socket,
                     onPacketReceived = { packet -> handlePacket(packet) },
                     onDisconnected = {
-                        Log.d(tag, "Disconnected from gateway")
+                        AppLog.i(tag, "Disconnected from gateway")
                         updateNotification("ارتباط با میزبان قطع شد")
                         stopRinging()
                         audioRelay?.stop()
@@ -105,7 +127,7 @@ class ClientBridgeService : Service() {
                 )
                 activeConnection?.startListening()
             } catch (e: Exception) {
-                Log.e(tag, "Connection failed", e)
+                AppLog.e(tag, "Connection failed", e)
                 updateNotification("خطا در اتصال به میزبان")
             } finally {
                 isConnecting.set(false)
@@ -114,6 +136,7 @@ class ClientBridgeService : Service() {
     }
 
     private fun handlePacket(packet: BridgePacket) {
+        AppLog.d(tag, "Packet from gateway: ${packet.type}")
         when (packet.type) {
             BridgePacket.TYPE_SMS_RECEIVED -> {
                 val sms = gson.fromJson(packet.payload, SmsData::class.java)
@@ -127,6 +150,7 @@ class ClientBridgeService : Service() {
     }
 
     private fun onSmsReceived(sms: SmsData) {
+        AppLog.i(tag, "SMS received from ${sms.sender}")
         val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         val intent = Intent(this, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
@@ -145,7 +169,6 @@ class ClientBridgeService : Service() {
 
         manager.notify(System.currentTimeMillis().toInt(), notif)
 
-        // Broadcast to UI
         val event = BridgeEventItem(
             type = "SMS",
             title = "پیامک از ${sms.sender}",
@@ -155,6 +178,7 @@ class ClientBridgeService : Service() {
     }
 
     private fun onCallStateChanged(call: CallStateData) {
+        AppLog.i(tag, "Call state changed: ${call.state}, caller: ${call.callerNumber}")
         when (call.state) {
             "RINGING" -> {
                 startRinging()
@@ -174,7 +198,6 @@ class ClientBridgeService : Service() {
             }
             "OFFHOOK" -> {
                 stopRinging()
-                // Start live audio relay
                 activeConnection?.let { conn ->
                     audioRelay?.start(conn.getInputStream(), conn.getOutputStream())
                 }
@@ -189,6 +212,7 @@ class ClientBridgeService : Service() {
     }
 
     fun answerCall() {
+        AppLog.i(tag, "Answering call")
         val payload = gson.toJson(CallCommand(CallCommand.ACTION_ANSWER))
         activeConnection?.sendPacket(BridgePacket(BridgePacket.TYPE_CALL_CMD, payload))
         stopRinging()
@@ -198,6 +222,7 @@ class ClientBridgeService : Service() {
     }
 
     fun rejectCall() {
+        AppLog.i(tag, "Rejecting call")
         val payload = gson.toJson(CallCommand(CallCommand.ACTION_REJECT))
         activeConnection?.sendPacket(BridgePacket(BridgePacket.TYPE_CALL_CMD, payload))
         stopRinging()
@@ -205,6 +230,7 @@ class ClientBridgeService : Service() {
     }
 
     fun endCall() {
+        AppLog.i(tag, "Ending call")
         val payload = gson.toJson(CallCommand(CallCommand.ACTION_HANGUP))
         activeConnection?.sendPacket(BridgePacket(BridgePacket.TYPE_CALL_CMD, payload))
         audioRelay?.stop()
@@ -214,6 +240,7 @@ class ClientBridgeService : Service() {
         val payload = gson.toJson(SmsSendRequest(recipient, body))
         val success = activeConnection?.sendPacket(BridgePacket(BridgePacket.TYPE_SMS_SEND_REQ, payload)) ?: false
         if (success) {
+            AppLog.i(tag, "Outgoing SMS sent to $recipient")
             broadcastEvent(
                 BridgeEventItem(
                     type = "SMS_SENT",
@@ -221,6 +248,8 @@ class ClientBridgeService : Service() {
                     detail = body
                 )
             )
+        } else {
+            AppLog.w(tag, "Failed to send outgoing SMS to $recipient (not connected?)")
         }
         return success
     }
@@ -231,7 +260,7 @@ class ClientBridgeService : Service() {
                 ringtone?.play()
             }
         } catch (e: Exception) {
-            Log.e(tag, "Error playing ringtone", e)
+            AppLog.e(tag, "Error playing ringtone", e)
         }
     }
 
@@ -241,7 +270,7 @@ class ClientBridgeService : Service() {
                 ringtone?.stop()
             }
         } catch (e: Exception) {
-            Log.e(tag, "Error stopping ringtone", e)
+            AppLog.e(tag, "Error stopping ringtone", e)
         }
     }
 
@@ -275,13 +304,16 @@ class ClientBridgeService : Service() {
     }
 
     private fun updateNotification(text: String) {
-        val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-        manager.notify(1002, buildNotification(text))
+        try {
+            val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+            manager.notify(1002, buildNotification(text))
+        } catch (_: Exception) {}
     }
 
     override fun onDestroy() {
         disconnect()
         instance = null
+        AppLog.i(tag, "ClientBridgeService destroyed")
         super.onDestroy()
     }
 
