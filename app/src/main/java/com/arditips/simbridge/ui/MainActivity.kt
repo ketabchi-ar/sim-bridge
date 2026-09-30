@@ -251,6 +251,22 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
+        binding.btnTetheringSettings.setOnClickListener {
+            try {
+                val intent = Intent().apply {
+                    action = "android.settings.TETHER_SETTINGS"
+                }
+                startActivity(intent)
+            } catch (e: Exception) {
+                try {
+                    val intent = Intent(android.provider.Settings.ACTION_WIRELESS_SETTINGS)
+                    startActivity(intent)
+                } catch (e2: Exception) {
+                    Toast.makeText(this, "امکان باز کردن تنظیمات تترینگ میسر نشد", Toast.LENGTH_SHORT).show()
+                }
+            }
+        }
+
         binding.btnSendSms.setOnClickListener {
             try {
                 val rawRecipient = binding.etRecipient.text?.toString()?.trim() ?: ""
