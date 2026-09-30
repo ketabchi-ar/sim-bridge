@@ -11,6 +11,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.content.pm.PackageManager
+import android.graphics.Color
 import android.os.Build
 import android.os.Bundle
 import android.view.View
@@ -57,10 +58,9 @@ class MainActivity : AppCompatActivity() {
         val allGranted = results.values.all { it }
         if (allGranted) {
             AppLog.i(tag, "All permissions granted by user")
-            Toast.makeText(this, "دسترسی‌ها تایید شدند ✓", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, "دسترسی‌ها با موفقیت تایید شدند ✓", Toast.LENGTH_SHORT).show()
         } else {
             AppLog.w(tag, "Some permissions were denied: $results")
-            Toast.makeText(this, "برخی دسترسی‌ها داده نشدند. لطفاً در صورت بروز خطا در تنظیمات فعال کنید.", Toast.LENGTH_LONG).show()
         }
     }
 
@@ -81,7 +81,7 @@ class MainActivity : AppCompatActivity() {
             } else {
                 registerReceiver(eventReceiver, filter)
             }
-            AppLog.i(tag, "MainActivity initialized successfully")
+            AppLog.i(tag, "MainActivity UI loaded")
         } catch (e: Exception) {
             AppLog.e(tag, "Error in onCreate", e)
         }
@@ -106,19 +106,37 @@ class MainActivity : AppCompatActivity() {
 
     private fun updateModeUi() {
         if (isGatewayMode) {
-            binding.tvStatusTitle.text = "وضعیت میزبان (گوشی اول)"
-            binding.layoutClientControls.visibility = View.GONE
+            binding.tvStatusTitle.text = "گوشی ۱ (میزبان سیم‌کارت)"
+            binding.btnSelectDevice.visibility = View.GONE
             binding.cardSendSms.visibility = View.GONE
+
             val isRunning = GatewayBridgeService.instance != null
-            binding.tvStatusMessage.text = if (isRunning) "میزبان فعال است ✓" else "میزبان متوقف است"
-            binding.btnToggleService.text = if (isRunning) getString(R.string.stop_server) else getString(R.string.start_server)
+            if (isRunning) {
+                binding.tvStatusMessage.text = "میزبان فعال است - در حال دریافت تماس و پیامک"
+                binding.viewStatusDot.backgroundTintList = ContextCompat.getColorStateList(this, android.R.color.holo_green_light)
+                binding.btnToggleService.text = "توقف سرویس میزبان"
+            } else {
+                binding.tvStatusMessage.text = "سرویس میزبان متوقف است"
+                binding.viewStatusDot.backgroundTintList = ContextCompat.getColorStateList(this, android.R.color.holo_red_light)
+                binding.btnToggleService.text = "شروع به کار میزبان (گوشی ۱)"
+            }
         } else {
-            binding.tvStatusTitle.text = "وضعیت کلاینت (گوشی دوم)"
-            binding.layoutClientControls.visibility = View.VISIBLE
+            binding.tvStatusTitle.text = "گوشی ۲ (کلاینت بدون سیم‌کارت)"
+            binding.btnSelectDevice.visibility = View.VISIBLE
             binding.cardSendSms.visibility = View.VISIBLE
+
             val isRunning = ClientBridgeService.instance != null
-            binding.tvStatusMessage.text = if (isRunning) getString(R.string.client_connected) else getString(R.string.client_disconnected)
-            binding.btnToggleService.text = if (isRunning) getString(R.string.disconnect) else getString(R.string.connect)
+            if (isRunning) {
+                binding.tvStatusMessage.text = "متصل به گوشی ۱ ✓"
+                binding.viewStatusDot.backgroundTintList = ContextCompat.getColorStateList(this, android.R.color.holo_green_light)
+                binding.btnToggleService.text = "قطع اتصال از گوشی ۱"
+                binding.btnSelectDevice.visibility = View.GONE
+            } else {
+                binding.tvStatusMessage.text = "در انتظار اتصال به گوشی ۱"
+                binding.viewStatusDot.backgroundTintList = ContextCompat.getColorStateList(this, android.R.color.holo_orange_light)
+                binding.btnToggleService.text = "انتخاب و اتصال سریع به گوشی ۱"
+                binding.btnSelectDevice.visibility = View.VISIBLE
+            }
         }
     }
 
@@ -127,12 +145,21 @@ class MainActivity : AppCompatActivity() {
             showLogsDialog()
         }
 
+        binding.tvClearEvents.setOnClickListener {
+            eventAdapter.clearEvents()
+            Toast.makeText(this, "لیست رویدادها پاک شد", Toast.LENGTH_SHORT).show()
+        }
+
         binding.btnToggleService.setOnClickListener {
             try {
                 if (isGatewayMode) {
                     toggleGatewayService()
                 } else {
-                    toggleClientService()
+                    if (ClientBridgeService.instance == null) {
+                        showPairedDevicesDialog()
+                    } else {
+                        disconnectClientService()
+                    }
                 }
             } catch (e: Exception) {
                 AppLog.e(tag, "Error toggling service", e)
@@ -145,7 +172,7 @@ class MainActivity : AppCompatActivity() {
                 showPairedDevicesDialog()
             } catch (e: Exception) {
                 AppLog.e(tag, "Error selecting paired device", e)
-                Toast.makeText(this, "خطا در دریافت لیست بلوتوث: ${e.message}", Toast.LENGTH_LONG).show()
+                Toast.makeText(this, "خطا: ${e.message}", Toast.LENGTH_LONG).show()
             }
         }
 
@@ -155,22 +182,22 @@ class MainActivity : AppCompatActivity() {
                 val body = binding.etMessageBody.text?.toString()?.trim() ?: ""
 
                 if (recipient.isEmpty() || body.isEmpty()) {
-                    Toast.makeText(this, "لطفاً شماره و متن پیام را وارد کنید", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(this, "شماره مقصد و متن پیام را وارد کنید", Toast.LENGTH_SHORT).show()
                     return@setOnClickListener
                 }
 
                 val client = ClientBridgeService.instance
                 if (client == null) {
-                    Toast.makeText(this, "ابتدا به میزبان متصل شوید", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(this, "ابتدا به گوشی اول متصل شوید", Toast.LENGTH_SHORT).show()
                     return@setOnClickListener
                 }
 
                 val ok = client.sendSms(recipient, body)
                 if (ok) {
                     binding.etMessageBody.setText("")
-                    Toast.makeText(this, "درخواست ارسال به سیم‌کارت اول منتقل شد", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(this, "پیام برای ارسال به سیم‌کارت اول منتقل شد ✓", Toast.LENGTH_SHORT).show()
                 } else {
-                    Toast.makeText(this, "ارسال ناموفق بود - اتصال را بررسی کنید", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(this, "ارسال ناموفق بود - وضعیت اتصال را چک کنید", Toast.LENGTH_SHORT).show()
                 }
             } catch (e: Exception) {
                 AppLog.e(tag, "Error sending SMS", e)
@@ -180,7 +207,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun toggleGatewayService() {
         if (!hasBluetoothConnectPermission()) {
-            Toast.makeText(this, "دسترسی اتصال بلوتوث لازم است", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, "تایید دسترسی بلوتوث لازم است", Toast.LENGTH_SHORT).show()
             requestAppPermissions()
             return
         }
@@ -203,16 +230,12 @@ class MainActivity : AppCompatActivity() {
         binding.root.postDelayed({ updateModeUi() }, 400)
     }
 
-    private fun toggleClientService() {
-        if (ClientBridgeService.instance == null) {
-            showPairedDevicesDialog()
-        } else {
-            val intent = Intent(this, ClientBridgeService::class.java).apply {
-                action = ClientBridgeService.ACTION_DISCONNECT
-            }
-            startService(intent)
-            binding.root.postDelayed({ updateModeUi() }, 400)
+    private fun disconnectClientService() {
+        val intent = Intent(this, ClientBridgeService::class.java).apply {
+            action = ClientBridgeService.ACTION_DISCONNECT
         }
+        startService(intent)
+        binding.root.postDelayed({ updateModeUi() }, 400)
     }
 
     @SuppressLint("MissingPermission")
@@ -226,7 +249,7 @@ class MainActivity : AppCompatActivity() {
         val btManager = getSystemService(Context.BLUETOOTH_SERVICE) as BluetoothManager
         val adapter = btManager.adapter
         if (adapter == null || !adapter.isEnabled) {
-            Toast.makeText(this, "بلوتوث دستگاه را روشن کنید", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, "لطفاً ابتدا بلوتوث را روشن کنید", Toast.LENGTH_SHORT).show()
             return
         }
 
@@ -236,9 +259,9 @@ class MainActivity : AppCompatActivity() {
             return
         }
 
-        val deviceNames = pairedDevices.map { "${it.name ?: "دستگاه ناشناس"} (${it.address})" }.toTypedArray()
+        val deviceNames = pairedDevices.map { "${it.name ?: "دستگاه"} (${it.address})" }.toTypedArray()
         AlertDialog.Builder(this)
-            .setTitle("انتخاب گوشی میزبان (دارای سیم‌کارت)")
+            .setTitle("انتخاب گوشی ۱ (دارای سیم‌کارت)")
             .setItems(deviceNames) { _, which ->
                 val selectedDevice = pairedDevices[which]
                 connectClientToDevice(selectedDevice.address)
@@ -274,16 +297,16 @@ class MainActivity : AppCompatActivity() {
         }
 
         AlertDialog.Builder(this)
-            .setTitle("لاگ‌های زنده سیستم")
+            .setTitle("لاگ‌های زنده برنامه")
             .setView(scrollView)
             .setPositiveButton("بستن", null)
-            .setNeutralButton("کپی کامل لاگ") { _, _ ->
+            .setNeutralButton("کپی کامل") { _, _ ->
                 val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
                 val clip = ClipData.newPlainText("SIM Bridge Logs", logs)
                 clipboard.setPrimaryClip(clip)
-                Toast.makeText(this, "لاگ‌ها کپی شدند", Toast.LENGTH_SHORT).show()
+                Toast.makeText(this, "لاگ در کلیپ‌بورد کپی شد", Toast.LENGTH_SHORT).show()
             }
-            .setNegativeButton("پاکسازی") { _, _ ->
+            .setNegativeButton("پاک کردن") { _, _ ->
                 AppLog.clear()
                 Toast.makeText(this, "لاگ‌ها پاک شدند", Toast.LENGTH_SHORT).show()
             }

@@ -14,11 +14,17 @@ import java.util.Locale
 class EventAdapter : RecyclerView.Adapter<EventAdapter.EventViewHolder>() {
 
     private val items = mutableListOf<BridgeEventItem>()
-    private val timeFormat = SimpleDateFormat("HH:mm:ss", Locale.getDefault())
+    private val timeFormat = SimpleDateFormat("HH:mm", Locale.getDefault())
 
     fun addEvent(event: BridgeEventItem) {
         items.add(0, event)
         notifyItemInserted(0)
+    }
+
+    fun clearEvents() {
+        val size = items.size
+        items.clear()
+        notifyItemRangeRemoved(0, size)
     }
 
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): EventViewHolder {
@@ -39,7 +45,12 @@ class EventAdapter : RecyclerView.Adapter<EventAdapter.EventViewHolder>() {
         private val tvEventDetails: TextView = itemView.findViewById(R.id.tvEventDetails)
 
         fun bind(item: BridgeEventItem, timeFormat: SimpleDateFormat) {
-            tvEventType.text = item.type
+            tvEventType.text = when (item.type) {
+                "CALL" -> "📞 تماس ورودی"
+                "SMS" -> "📩 پیامک دریافتی"
+                "SMS_SENT" -> "📤 پیامک ارسالی"
+                else -> item.type
+            }
             tvEventTime.text = timeFormat.format(Date(item.timestamp))
             tvEventSender.text = item.title
             tvEventDetails.text = item.detail
