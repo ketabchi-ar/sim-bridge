@@ -63,13 +63,13 @@ class LiveAudioRelay(private val context: Context) {
         val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
 
         try {
-            audioManager.mode = AudioManager.MODE_IN_COMMUNICATION
-            routeAudio(audioManager, useSpeaker)
-            if (useSpeaker) {
-                try {
-                    val maxVol = audioManager.getStreamMaxVolume(AudioManager.STREAM_VOICE_CALL)
-                    audioManager.setStreamVolume(AudioManager.STREAM_VOICE_CALL, maxVol, 0)
-                } catch (_: Exception) {}
+            if (!useSpeaker) {
+                // Client side (S26) uses communication mode
+                audioManager.mode = AudioManager.MODE_IN_COMMUNICATION
+                routeAudio(audioManager, false)
+            } else {
+                // Host side (S21) is cellular call - DO NOT override mode, only route
+                routeAudio(audioManager, true)
             }
 
             val minRecordBuf = AudioRecord.getMinBufferSize(sampleRate, channelIn, encoding)
