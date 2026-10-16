@@ -7,9 +7,11 @@ import android.app.Service
 import android.bluetooth.BluetoothAdapter
 import android.bluetooth.BluetoothManager
 import android.bluetooth.BluetoothServerSocket
+import android.bluetooth.BluetoothSocket
 import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
+import android.net.Uri
 import android.os.Build
 import android.os.IBinder
 import android.telecom.TelecomManager
@@ -17,10 +19,12 @@ import android.telephony.SmsManager
 import androidx.core.app.NotificationCompat
 import com.arditips.simbridge.R
 import com.arditips.simbridge.SimBridgeApp
+import com.arditips.simbridge.audio.LiveAudioRelay
 import com.arditips.simbridge.bluetooth.BluetoothConnection
 import com.arditips.simbridge.bluetooth.BluetoothConstants
 import com.arditips.simbridge.model.BridgePacket
 import com.arditips.simbridge.model.CallCommand
+import com.arditips.simbridge.model.CallMakeRequest
 import com.arditips.simbridge.model.CallStateData
 import com.arditips.simbridge.model.SmsData
 import com.arditips.simbridge.model.SmsSendRequest
@@ -36,6 +40,9 @@ class GatewayBridgeService : Service() {
     private val isRunning = AtomicBoolean(false)
     private var serverSocket: BluetoothServerSocket? = null
     private var activeConnection: BluetoothConnection? = null
+    private var audioServerSocket: BluetoothServerSocket? = null
+    private var audioSocket: BluetoothSocket? = null
+    private var liveAudioRelay: LiveAudioRelay? = null
     private val gson = Gson()
 
     companion object {
@@ -106,6 +113,30 @@ class GatewayBridgeService : Service() {
                 )
                 AppLog.i(tag, "Gateway server socket listening...")
 
+                try {
+                    audioServerSocket = adapter.listenUsingRfcommWithServiceRecord(
+                        "SimBridgeAudio",
+                        BluetoothConstants.AUDIO_UUID
+                    )
+                    Thread {
+                        while (isRunning.get()) {
+                            try {
+                                val sock = audioServerSocket?.accept() ?: break
+                                audioSocket?.close()
+                                audioSocket = sock
+                                AppLog.i(tag, "Client connected to audio channel")
+                                liveAudioRelay?.stop()
+                                liveAudioRelay = LiveAudioRelay(this@GatewayBridgeService)
+                                liveAudioRelay?.start(sock.inputStream, sock.outputStream)
+                            } catch (e: Exception) {
+                                break
+                            }
+                        }
+                    }.start()
+                } catch (e: Exception) {
+                    AppLog.e(tag, "Failed to start audio server socket", e)
+                }
+
                 while (isRunning.get()) {
                     val socket = serverSocket?.accept() ?: break
                     val deviceName = try { socket.remoteDevice.name ?: socket.remoteDevice.address } catch (_: Exception) { "Client" }
@@ -140,6 +171,10 @@ class GatewayBridgeService : Service() {
                 val cmd = gson.fromJson(packet.payload, CallCommand::class.java)
                 handleCallCommand(cmd.action)
             }
+            BridgePacket.TYPE_CALL_MAKE -> {
+                val req = gson.fromJson(packet.payload, CallMakeRequest::class.java)
+                makeOutgoingCall(req.number)
+            }
             BridgePacket.TYPE_PING -> {
                 activeConnection?.sendPacket(BridgePacket(BridgePacket.TYPE_PONG, "{}"))
             }
@@ -158,6 +193,31 @@ class GatewayBridgeService : Service() {
         val packet = BridgePacket(BridgePacket.TYPE_CALL_STATE, payload)
         activeConnection?.sendPacket(packet)
         AppLog.i(tag, "Call state $state relayed to client for $callerNumber")
+
+        if (state == "IDLE") {
+            try {
+                liveAudioRelay?.stop()
+                liveAudioRelay = null
+                audioSocket?.close()
+                audioSocket = null
+            } catch (e: Exception) {
+                AppLog.e(tag, "Error closing audio on call IDLE", e)
+            }
+        }
+    }
+
+    @SuppressLint("MissingPermission")
+    private fun makeOutgoingCall(number: String) {
+        try {
+            val uri = Uri.parse("tel:${Uri.encode(number)}")
+            val intent = Intent(Intent.ACTION_CALL, uri).apply {
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK
+            }
+            startActivity(intent)
+            AppLog.i(tag, "Outgoing call initiated from SIM 1 to $number")
+        } catch (e: Exception) {
+            AppLog.e(tag, "Failed to initiate call to $number", e)
+        }
     }
 
     @SuppressLint("MissingPermission")
@@ -202,6 +262,10 @@ class GatewayBridgeService : Service() {
     private fun stopServer() {
         isRunning.set(false)
         try {
+            liveAudioRelay?.stop()
+            liveAudioRelay = null
+            audioSocket?.close()
+            audioServerSocket?.close()
             activeConnection?.close()
             serverSocket?.close()
         } catch (e: Exception) {

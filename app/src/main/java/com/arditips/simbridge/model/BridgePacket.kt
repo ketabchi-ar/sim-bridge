@@ -9,6 +9,7 @@ data class BridgePacket(
         const val TYPE_SMS_SEND_REQ = "SMS_SEND_REQ"
         const val TYPE_CALL_STATE = "CALL_STATE"
         const val TYPE_CALL_CMD = "CALL_CMD"
+        const val TYPE_CALL_MAKE = "CALL_MAKE"
         const val TYPE_PING = "PING"
         const val TYPE_PONG = "PONG"
     }
@@ -39,6 +40,10 @@ data class CallCommand(
         const val ACTION_HANGUP = "HANGUP"
     }
 }
+
+data class CallMakeRequest(
+    val number: String
+)
 
 data class BridgeEventItem(
     val type: String,

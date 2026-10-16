@@ -7,6 +7,7 @@ import android.app.PendingIntent
 import android.app.Service
 import android.bluetooth.BluetoothAdapter
 import android.bluetooth.BluetoothManager
+import android.bluetooth.BluetoothSocket
 import android.content.ContentValues
 import android.content.Context
 import android.content.Intent
@@ -16,13 +17,16 @@ import android.media.Ringtone
 import android.media.RingtoneManager
 import android.net.Uri
 import android.os.Build
+import android.os.Handler
 import android.os.IBinder
+import android.os.Looper
 import android.os.VibrationEffect
 import android.os.Vibrator
 import android.provider.Telephony
 import androidx.core.app.NotificationCompat
 import com.arditips.simbridge.R
 import com.arditips.simbridge.SimBridgeApp
+import com.arditips.simbridge.audio.LiveAudioRelay
 import com.arditips.simbridge.bluetooth.BluetoothConnection
 import com.arditips.simbridge.bluetooth.BluetoothConstants
 import com.arditips.simbridge.data.LocalMessageStore
@@ -30,9 +34,11 @@ import com.arditips.simbridge.data.SmsRepository
 import com.arditips.simbridge.model.BridgeEventItem
 import com.arditips.simbridge.model.BridgePacket
 import com.arditips.simbridge.model.CallCommand
+import com.arditips.simbridge.model.CallMakeRequest
 import com.arditips.simbridge.model.CallStateData
 import com.arditips.simbridge.model.SmsData
 import com.arditips.simbridge.model.SmsSendRequest
+import com.arditips.simbridge.receiver.OtpCopyReceiver
 import com.arditips.simbridge.ui.ChatActivity
 import com.arditips.simbridge.ui.IncomingCallActivity
 import com.arditips.simbridge.ui.MainActivity
@@ -46,6 +52,11 @@ class ClientBridgeService : Service() {
     private val tag = "ClientBridgeService"
     private val isConnecting = AtomicBoolean(false)
     private var activeConnection: BluetoothConnection? = null
+    private var audioSocket: BluetoothSocket? = null
+    private var liveAudioRelay: LiveAudioRelay? = null
+    private var lastConnectedAddress: String? = null
+    private var shouldAutoReconnect = true
+    private val mainHandler = Handler(Looper.getMainLooper())
     private var ringtone: Ringtone? = null
     private var vibrator: Vibrator? = null
     private val gson = Gson()
@@ -86,6 +97,7 @@ class ClientBridgeService : Service() {
         when (intent?.action) {
             ACTION_DISCONNECT -> {
                 AppLog.i(tag, "Disconnecting ClientBridgeService")
+                shouldAutoReconnect = false
                 disconnect()
                 stopForeground(STOP_FOREGROUND_REMOVE)
                 stopSelf()
@@ -94,6 +106,7 @@ class ClientBridgeService : Service() {
             ACTION_CONNECT -> {
                 val address = intent.getStringExtra(EXTRA_DEVICE_ADDRESS)
                 if (address != null) {
+                    shouldAutoReconnect = true
                     try {
                         val notif = buildNotification("در حال اتصال به میزبان...")
                         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
@@ -122,6 +135,7 @@ class ClientBridgeService : Service() {
     @SuppressLint("MissingPermission")
     private fun connectToGateway(deviceAddress: String) {
         if (isConnecting.getAndSet(true)) return
+        lastConnectedAddress = deviceAddress
 
         Thread {
             try {
@@ -144,18 +158,94 @@ class ClientBridgeService : Service() {
                     onPacketReceived = { packet -> handlePacket(packet) },
                     onDisconnected = {
                         AppLog.i(tag, "Disconnected from gateway")
-                        updateNotification("ارتباط با میزبان قطع شد")
+                        updateNotification("ارتباط با میزبان قطع شد - تلاش مجدد خودکار...")
                         stopRingingAndVibration()
+                        stopAudioRelay()
+                        activeConnection = null
+                        if (shouldAutoReconnect) {
+                            mainHandler.postDelayed({
+                                if (activeConnection == null && shouldAutoReconnect) {
+                                    lastConnectedAddress?.let { connectToGateway(it) }
+                                }
+                            }, 5000)
+                        }
                     }
                 )
                 activeConnection?.startListening()
             } catch (e: Exception) {
                 AppLog.e(tag, "Connection failed", e)
-                updateNotification("خطا در اتصال به میزبان")
+                updateNotification("خطا در اتصال به میزبان - تلاش مجدد...")
+                if (shouldAutoReconnect) {
+                    mainHandler.postDelayed({
+                        if (activeConnection == null && shouldAutoReconnect) {
+                            lastConnectedAddress?.let { connectToGateway(it) }
+                        }
+                    }, 5000)
+                }
             } finally {
                 isConnecting.set(false)
             }
         }.start()
+    }
+
+    @SuppressLint("MissingPermission")
+    private fun startAudioRelay() {
+        val address = lastConnectedAddress ?: return
+        Thread {
+            try {
+                val btManager = getSystemService(Context.BLUETOOTH_SERVICE) as? BluetoothManager
+                val adapter = btManager?.adapter ?: return@Thread
+                val device = adapter.getRemoteDevice(address)
+                val socket = device.createRfcommSocketToServiceRecord(BluetoothConstants.AUDIO_UUID)
+                socket.connect()
+                audioSocket = socket
+                AppLog.i(tag, "Audio socket connected to gateway successfully")
+                liveAudioRelay?.stop()
+                liveAudioRelay = LiveAudioRelay(this@ClientBridgeService)
+                liveAudioRelay?.start(socket.inputStream, socket.outputStream)
+            } catch (e: Exception) {
+                AppLog.e(tag, "Failed to start client audio stream", e)
+            }
+        }.start()
+    }
+
+    private fun stopAudioRelay() {
+        try {
+            liveAudioRelay?.stop()
+            liveAudioRelay = null
+            audioSocket?.close()
+            audioSocket = null
+            AppLog.i(tag, "Client audio stream stopped")
+        } catch (e: Exception) {
+            AppLog.e(tag, "Error stopping client audio stream", e)
+        }
+    }
+
+    fun makeCall(number: String): Boolean {
+        val normalized = PhoneNumberUtil.normalize(number)
+        val payload = gson.toJson(CallMakeRequest(normalized))
+        val success = activeConnection?.sendPacket(BridgePacket(BridgePacket.TYPE_CALL_MAKE, payload)) ?: false
+        if (success) {
+            AppLog.i(tag, "Initiated outgoing call to $normalized")
+            val contactName = SmsRepository.getContactName(this, normalized) ?: normalized
+            val intent = Intent(this, IncomingCallActivity::class.java).apply {
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
+                putExtra("CALLER_NUMBER", normalized)
+                putExtra("CALLER_NAME", contactName)
+                putExtra("IS_OUTGOING", true)
+            }
+            startActivity(intent)
+            broadcastEvent(
+                BridgeEventItem(
+                    type = "CALL",
+                    title = "تماس خروجی",
+                    detail = "به شماره: $contactName"
+                )
+            )
+        } else {
+            AppLog.w(tag, "Failed to send make call request (not connected?)")
+        }
+        return success
     }
 
     private fun handlePacket(packet: BridgePacket) {
@@ -170,6 +260,23 @@ class ClientBridgeService : Service() {
                 onCallStateChanged(call)
             }
         }
+    }
+
+    private fun extractOtp(body: String): String? {
+        val converted = body.map { ch ->
+            when (ch) {
+                in '۰'..'۹' -> ('0'.code + (ch.code - '۰'.code)).toChar()
+                in '٠'..'٩' -> ('0'.code + (ch.code - '٠'.code)).toChar()
+                else -> ch
+            }
+        }.joinToString("")
+
+        val keywords = listOf("کد", "رمز", "تایید", "ورود", "code", "otp", "pin", "password")
+        val hasKeyword = keywords.any { converted.contains(it, ignoreCase = true) }
+
+        val regex = Regex("""(?<!\d)(\d{4,8})(?!\d)""")
+        val match = regex.find(converted)?.value
+        return if (hasKeyword && match != null) match else if (match != null && match.length in 4..6) match else null
     }
 
     private fun onSmsReceived(sms: SmsData) {
@@ -203,7 +310,8 @@ class ClientBridgeService : Service() {
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         )
 
-        val notif = NotificationCompat.Builder(this, SimBridgeApp.CHANNEL_SMS)
+        val otp = extractOtp(sms.body)
+        val notifBuilder = NotificationCompat.Builder(this, SimBridgeApp.CHANNEL_SMS)
             .setContentTitle("پیامک از: $contactName")
             .setContentText(sms.body)
             .setStyle(NotificationCompat.BigTextStyle().bigText(sms.body))
@@ -211,9 +319,27 @@ class ClientBridgeService : Service() {
             .setContentIntent(pendingIntent)
             .setAutoCancel(true)
             .setPriority(NotificationCompat.PRIORITY_HIGH)
-            .build()
 
-        manager.notify(normalizedSender.hashCode(), notif)
+        if (otp != null) {
+            val copyIntent = Intent(this, OtpCopyReceiver::class.java).apply {
+                action = OtpCopyReceiver.ACTION_COPY_OTP
+                putExtra(OtpCopyReceiver.EXTRA_OTP, otp)
+                putExtra(OtpCopyReceiver.EXTRA_NOTIF_ID, normalizedSender.hashCode())
+            }
+            val copyPendingIntent = PendingIntent.getBroadcast(
+                this,
+                (normalizedSender + "_otp").hashCode(),
+                copyIntent,
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            )
+            notifBuilder.addAction(
+                android.R.drawable.ic_menu_save,
+                "کپی رمز پویا: $otp",
+                copyPendingIntent
+            )
+        }
+
+        manager.notify(normalizedSender.hashCode(), notifBuilder.build())
 
         // 4. Broadcast live update to SimBridge Chat & Main Activity
         val event = BridgeEventItem(
@@ -307,10 +433,12 @@ class ClientBridgeService : Service() {
             "OFFHOOK" -> {
                 stopRingingAndVibration()
                 dismissCallNotification()
+                startAudioRelay()
             }
             "IDLE" -> {
                 stopRingingAndVibration()
                 dismissCallNotification()
+                stopAudioRelay()
                 val intent = Intent("com.arditips.simbridge.CALL_ENDED")
                 sendBroadcast(intent)
             }

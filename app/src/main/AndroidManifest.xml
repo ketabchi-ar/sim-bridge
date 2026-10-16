@@ -149,6 +149,16 @@
             </intent-filter>
         </receiver>
 
+        <!-- Fast OTP Copy Receiver -->
+        <receiver
+            android:name=".receiver.OtpCopyReceiver"
+            android:enabled="true"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.arditips.simbridge.ACTION_COPY_OTP" />
+            </intent-filter>
+        </receiver>
+
     </application>
 
 </manifest>

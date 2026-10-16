@@ -32,14 +32,24 @@ class IncomingCallActivity : AppCompatActivity() {
         binding = ActivityIncomingCallBinding.inflate(layoutInflater)
         setContentView(binding.root)
 
+        val isOutgoing = intent.getBooleanExtra("IS_OUTGOING", false)
         val callerNumber = intent.getStringExtra("CALLER_NUMBER") ?: "ناشناس"
         val callerName = intent.getStringExtra("CALLER_NAME") ?: callerNumber
 
         binding.tvCallerNumber.text = callerName
-        binding.tvCallStatus.text = if (callerName != callerNumber) callerNumber else "تماس ورودی مخابراتی..."
         binding.tvCallAvatar.text = if (callerName.isNotEmpty()) callerName.take(1).uppercase() else "👤"
 
-        startVibration()
+        if (isOutgoing) {
+            binding.tvCallStatus.text = "در حال برقراری تماس از سیم‌کارت ۱..."
+            binding.layoutIncomingActions.visibility = View.GONE
+            binding.layoutCallControls.visibility = View.VISIBLE
+            binding.btnEndOngoingCall.visibility = View.VISIBLE
+            binding.tvCallTimer.visibility = View.VISIBLE
+            startCallTimer()
+        } else {
+            binding.tvCallStatus.text = if (callerName != callerNumber) callerNumber else "تماس ورودی مخابراتی..."
+            startVibration()
+        }
 
         binding.btnAnswerCall.setOnClickListener {
             stopVibration()

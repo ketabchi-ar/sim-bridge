@@ -155,6 +155,77 @@
                     </LinearLayout>
                 </com.google.android.material.card.MaterialCardView>
 
+                <!-- Direct Outgoing Call Card (Client Mode) -->
+                <com.google.android.material.card.MaterialCardView
+                    android:id="@+id/cardDirectCall"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    app:cardBackgroundColor="@color/card_dark"
+                    app:cardCornerRadius="16dp"
+                    app:strokeColor="#2E3842"
+                    app:strokeWidth="1dp"
+                    android:layout_marginBottom="16dp"
+                    android:visibility="gone">
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="vertical"
+                        android:padding="16dp">
+
+                        <TextView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="📞 تماس مستقیم از سیم‌کارت ۱"
+                            android:textColor="@color/white"
+                            android:textStyle="bold"
+                            android:textSize="15sp" />
+
+                        <LinearLayout
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="10dp"
+                            android:gravity="center_vertical"
+                            android:orientation="horizontal">
+
+                            <com.google.android.material.textfield.TextInputLayout
+                                android:layout_width="0dp"
+                                android:layout_height="wrap_content"
+                                android:layout_weight="1"
+                                android:hint="شماره مقصد تماس"
+                                style="@style/Widget.Material3.TextInputLayout.OutlinedBox">
+
+                                <com.google.android.material.textfield.TextInputEditText
+                                    android:id="@+id/etCallNumber"
+                                    android:layout_width="match_parent"
+                                    android:layout_height="wrap_content"
+                                    android:inputType="phone"
+                                    android:textColor="@color/white" />
+                            </com.google.android.material.textfield.TextInputLayout>
+
+                            <com.google.android.material.button.MaterialButton
+                                android:id="@+id/btnPickCallContact"
+                                android:layout_width="48dp"
+                                android:layout_height="56dp"
+                                android:layout_marginStart="8dp"
+                                style="@style/Widget.Material3.Button.TonalButton"
+                                app:icon="@android:drawable/ic_menu_myplaces"
+                                app:iconGravity="textStart"
+                                app:iconPadding="0dp"
+                                app:cornerRadius="12dp" />
+                        </LinearLayout>
+
+                        <com.google.android.material.button.MaterialButton
+                            android:id="@+id/btnStartCall"
+                            android:layout_width="match_parent"
+                            android:layout_height="50dp"
+                            android:layout_marginTop="10dp"
+                            android:text="برقراری تماس صوتی"
+                            app:icon="@android:drawable/stat_sys_phone_call"
+                            app:cornerRadius="12dp" />
+                    </LinearLayout>
+                </com.google.android.material.card.MaterialCardView>
+
                 <!-- Live Events Section Header -->
                 <LinearLayout
                     android:layout_width="match_parent"

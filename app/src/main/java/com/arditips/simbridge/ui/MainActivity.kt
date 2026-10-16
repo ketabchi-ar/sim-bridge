@@ -46,6 +46,7 @@ class MainActivity : AppCompatActivity() {
     private val eventAdapter = EventAdapter()
     private val gson = Gson()
     private var currentTab = 0 // 0: Gateway, 1: Client, 2: Messages
+    private var isPickingCallContact = false
 
     private lateinit var conversationAdapter: ConversationAdapter
 
@@ -161,6 +162,7 @@ class MainActivity : AppCompatActivity() {
                 // Gateway Mode
                 binding.scrollControls.visibility = View.VISIBLE
                 binding.layoutMessagesTab.visibility = View.GONE
+                binding.cardDirectCall.visibility = View.GONE
 
                 binding.tvStatusTitle.text = "گوشی ۱ (میزبان سیم‌کارت)"
                 binding.btnSelectDevice.visibility = View.GONE
@@ -185,6 +187,7 @@ class MainActivity : AppCompatActivity() {
                 binding.btnSelectDevice.visibility = View.VISIBLE
 
                 val isRunning = ClientBridgeService.instance != null
+                binding.cardDirectCall.visibility = if (isRunning) View.VISIBLE else View.GONE
                 if (isRunning) {
                     binding.tvStatusMessage.text = "متصل به گوشی ۱ ✓"
                     binding.viewStatusDot.backgroundTintList = ContextCompat.getColorStateList(this, android.R.color.holo_green_light)
@@ -212,8 +215,28 @@ class MainActivity : AppCompatActivity() {
         }
 
         binding.btnPickContact.setOnClickListener {
+            isPickingCallContact = false
             val intent = Intent(Intent.ACTION_PICK, ContactsContract.CommonDataKinds.Phone.CONTENT_URI)
             contactPickerLauncher.launch(intent)
+        }
+
+        binding.btnPickCallContact.setOnClickListener {
+            isPickingCallContact = true
+            val intent = Intent(Intent.ACTION_PICK, ContactsContract.CommonDataKinds.Phone.CONTENT_URI)
+            contactPickerLauncher.launch(intent)
+        }
+
+        binding.btnStartCall.setOnClickListener {
+            val num = binding.etCallNumber.text.toString().trim()
+            if (num.isEmpty()) {
+                Toast.makeText(this, "لطفاً شماره مقصد را وارد کنید", Toast.LENGTH_SHORT).show()
+                return@setOnClickListener
+            }
+            if (ClientBridgeService.instance == null) {
+                Toast.makeText(this, "ابتدا به گوشی ۱ متصل شوید", Toast.LENGTH_SHORT).show()
+                return@setOnClickListener
+            }
+            ClientBridgeService.instance?.makeCall(num)
         }
 
         binding.tvRefreshConversations.setOnClickListener {
@@ -313,7 +336,12 @@ class MainActivity : AppCompatActivity() {
         try {
             if (cursor != null && cursor.moveToFirst()) {
                 val rawNumber = cursor.getString(cursor.getColumnIndex(ContactsContract.CommonDataKinds.Phone.NUMBER))
-                binding.etRecipient.setText(PhoneNumberUtil.normalize(rawNumber))
+                val normalized = PhoneNumberUtil.normalize(rawNumber)
+                if (isPickingCallContact) {
+                    binding.etCallNumber.setText(normalized)
+                } else {
+                    binding.etRecipient.setText(normalized)
+                }
             }
         } catch (e: Exception) {
             AppLog.e(tag, "Failed to read contact phone: ${e.message}")
