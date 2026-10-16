@@ -65,6 +65,12 @@ class LiveAudioRelay(private val context: Context) {
         try {
             audioManager.mode = AudioManager.MODE_IN_COMMUNICATION
             routeAudio(audioManager, useSpeaker)
+            if (useSpeaker) {
+                try {
+                    val maxVol = audioManager.getStreamMaxVolume(AudioManager.STREAM_VOICE_CALL)
+                    audioManager.setStreamVolume(AudioManager.STREAM_VOICE_CALL, maxVol, 0)
+                } catch (_: Exception) {}
+            }
 
             val minRecordBuf = AudioRecord.getMinBufferSize(sampleRate, channelIn, encoding)
             val minPlayBuf = AudioTrack.getMinBufferSize(sampleRate, channelOut, encoding)
