@@ -3,11 +3,13 @@ package com.arditips.simbridge.audio
 import android.annotation.SuppressLint
 import android.content.Context
 import android.media.AudioAttributes
+import android.media.AudioDeviceInfo
 import android.media.AudioFormat
 import android.media.AudioManager
 import android.media.AudioRecord
 import android.media.AudioTrack
 import android.media.MediaRecorder
+import android.os.Build
 import com.arditips.simbridge.bluetooth.BluetoothConstants
 import com.arditips.simbridge.util.AppLog
 import java.io.InputStream
@@ -29,16 +31,40 @@ class LiveAudioRelay(private val context: Context) {
     private val channelOut = AudioFormat.CHANNEL_OUT_MONO
     private val encoding = AudioFormat.ENCODING_PCM_16BIT
 
+    fun setSpeaker(useSpeaker: Boolean) {
+        val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
+        routeAudio(audioManager, useSpeaker)
+    }
+
+    private fun routeAudio(audioManager: AudioManager, useSpeaker: Boolean) {
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                val targetType = if (useSpeaker) AudioDeviceInfo.TYPE_BUILTIN_SPEAKER else AudioDeviceInfo.TYPE_BUILTIN_EARPIECE
+                val device = audioManager.availableCommunicationDevices.firstOrNull { it.type == targetType }
+                    ?: if (!useSpeaker) audioManager.availableCommunicationDevices.firstOrNull { it.type == AudioDeviceInfo.TYPE_BUILTIN_SPEAKER } else null
+                if (device != null) {
+                    audioManager.setCommunicationDevice(device)
+                    AppLog.i(tag, "Audio routed to ${if (useSpeaker) "SPEAKER" else "EARPIECE"}")
+                }
+            } else {
+                @Suppress("DEPRECATION")
+                audioManager.isSpeakerphoneOn = useSpeaker
+            }
+        } catch (e: Exception) {
+            AppLog.e(tag, "Error routing audio", e)
+        }
+    }
+
     @SuppressLint("MissingPermission")
-    fun start(inputStream: InputStream, outputStream: OutputStream) {
+    fun start(inputStream: InputStream, outputStream: OutputStream, useSpeaker: Boolean = true) {
         if (isRunning.getAndSet(true)) return
 
-        AppLog.i(tag, "Starting dual-path live voice relay session")
+        AppLog.i(tag, "Starting dual-path live voice relay session (speaker=$useSpeaker)")
         val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
 
         try {
             audioManager.mode = AudioManager.MODE_IN_COMMUNICATION
-            audioManager.isSpeakerphoneOn = true
+            routeAudio(audioManager, useSpeaker)
 
             val minRecordBuf = AudioRecord.getMinBufferSize(sampleRate, channelIn, encoding)
             val minPlayBuf = AudioTrack.getMinBufferSize(sampleRate, channelOut, encoding)
@@ -147,6 +173,12 @@ class LiveAudioRelay(private val context: Context) {
             audioTrack = null
 
             val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                audioManager.clearCommunicationDevice()
+            } else {
+                @Suppress("DEPRECATION")
+                audioManager.isSpeakerphoneOn = false
+            }
             audioManager.mode = AudioManager.MODE_NORMAL
         } catch (e: Exception) {
             AppLog.e(tag, "Error stopping audio relay", e)

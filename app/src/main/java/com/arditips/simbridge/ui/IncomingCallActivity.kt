@@ -20,7 +20,7 @@ class IncomingCallActivity : AppCompatActivity() {
     private lateinit var binding: ActivityIncomingCallBinding
     private var vibrator: Vibrator? = null
     private var isMuted = false
-    private var isSpeakerOn = true
+    private var isSpeakerOn = false
     private var callSeconds = 0
     private val handler = Handler(Looper.getMainLooper())
     private var timerRunnable: Runnable? = null
@@ -52,6 +52,7 @@ class IncomingCallActivity : AppCompatActivity() {
         }
 
         binding.btnAnswerCall.setOnClickListener {
+            binding.btnAnswerCall.isEnabled = false
             stopVibration()
             ClientBridgeService.instance?.answerCall()
 
@@ -65,12 +66,14 @@ class IncomingCallActivity : AppCompatActivity() {
         }
 
         binding.btnRejectCall.setOnClickListener {
+            binding.btnRejectCall.isEnabled = false
             stopVibration()
             ClientBridgeService.instance?.rejectCall()
             finish()
         }
 
         binding.btnEndOngoingCall.setOnClickListener {
+            binding.btnEndOngoingCall.isEnabled = false
             stopVibration()
             stopCallTimer()
             ClientBridgeService.instance?.endCall()
@@ -78,9 +81,8 @@ class IncomingCallActivity : AppCompatActivity() {
         }
 
         binding.btnToggleSpeaker.setOnClickListener {
-            val audioManager = getSystemService(Context.AUDIO_SERVICE) as AudioManager
             isSpeakerOn = !isSpeakerOn
-            audioManager.isSpeakerphoneOn = isSpeakerOn
+            ClientBridgeService.instance?.setSpeaker(isSpeakerOn)
             binding.btnToggleSpeaker.setIconResource(
                 if (isSpeakerOn) android.R.drawable.stat_sys_speakerphone else android.R.drawable.stat_sys_phone_call
             )

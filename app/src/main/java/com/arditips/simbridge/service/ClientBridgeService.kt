@@ -51,6 +51,8 @@ class ClientBridgeService : Service() {
 
     private val tag = "ClientBridgeService"
     private val isConnecting = AtomicBoolean(false)
+    private val isAudioStreaming = AtomicBoolean(false)
+    private val isAnswering = AtomicBoolean(false)
     private var activeConnection: BluetoothConnection? = null
     private var audioSocket: BluetoothSocket? = null
     private var liveAudioRelay: LiveAudioRelay? = null
@@ -188,11 +190,26 @@ class ClientBridgeService : Service() {
         }.start()
     }
 
+    fun setSpeaker(useSpeaker: Boolean) {
+        liveAudioRelay?.setSpeaker(useSpeaker)
+    }
+
     @SuppressLint("MissingPermission")
     private fun startAudioRelay() {
-        val address = lastConnectedAddress ?: return
+        if (!isAudioStreaming.compareAndSet(false, true)) {
+            AppLog.w(tag, "Audio stream already connecting/connected, ignoring redundant request")
+            return
+        }
+        val address = lastConnectedAddress ?: run {
+            isAudioStreaming.set(false)
+            return
+        }
         Thread {
             try {
+                if (audioSocket?.isConnected == true) {
+                    AppLog.i(tag, "Audio socket already connected")
+                    return@Thread
+                }
                 val btManager = getSystemService(Context.BLUETOOTH_SERVICE) as? BluetoothManager
                 val adapter = btManager?.adapter ?: return@Thread
                 val device = adapter.getRemoteDevice(address)
@@ -202,14 +219,17 @@ class ClientBridgeService : Service() {
                 AppLog.i(tag, "Audio socket connected to gateway successfully")
                 liveAudioRelay?.stop()
                 liveAudioRelay = LiveAudioRelay(this@ClientBridgeService)
-                liveAudioRelay?.start(socket.inputStream, socket.outputStream)
+                liveAudioRelay?.start(socket.inputStream, socket.outputStream, useSpeaker = false)
             } catch (e: Exception) {
                 AppLog.e(tag, "Failed to start client audio stream", e)
+                isAudioStreaming.set(false)
             }
         }.start()
     }
 
     private fun stopAudioRelay() {
+        isAudioStreaming.set(false)
+        isAnswering.set(false)
         try {
             liveAudioRelay?.stop()
             liveAudioRelay = null
@@ -493,6 +513,10 @@ class ClientBridgeService : Service() {
     }
 
     fun answerCall() {
+        if (isAnswering.getAndSet(true)) {
+            AppLog.w(tag, "Already answering call, ignoring duplicate action")
+            return
+        }
         AppLog.i(tag, "Answering call")
         val payload = gson.toJson(CallCommand(CallCommand.ACTION_ANSWER))
         activeConnection?.sendPacket(BridgePacket(BridgePacket.TYPE_CALL_CMD, payload))

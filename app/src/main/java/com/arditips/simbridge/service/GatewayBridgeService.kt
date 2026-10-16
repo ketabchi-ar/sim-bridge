@@ -127,7 +127,7 @@ class GatewayBridgeService : Service() {
                                 AppLog.i(tag, "Client connected to audio channel")
                                 liveAudioRelay?.stop()
                                 liveAudioRelay = LiveAudioRelay(this@GatewayBridgeService)
-                                liveAudioRelay?.start(sock.inputStream, sock.outputStream)
+                                liveAudioRelay?.start(sock.inputStream, sock.outputStream, useSpeaker = true)
                             } catch (e: Exception) {
                                 break
                             }
