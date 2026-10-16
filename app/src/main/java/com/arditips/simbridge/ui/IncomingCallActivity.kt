@@ -25,6 +25,16 @@ class IncomingCallActivity : AppCompatActivity() {
     private val handler = Handler(Looper.getMainLooper())
     private var timerRunnable: Runnable? = null
 
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        val callerNumber = intent.getStringExtra("CALLER_NUMBER") ?: return
+        val callerName = intent.getStringExtra("CALLER_NAME") ?: callerNumber
+        binding.tvCallerNumber.text = callerName
+        binding.tvCallStatus.text = if (callerName != callerNumber) callerNumber else "تماس ورودی مخابراتی..."
+        binding.tvCallAvatar.text = if (callerName.isNotEmpty()) callerName.take(1).uppercase() else "👤"
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         wakeScreenAndUnlock()

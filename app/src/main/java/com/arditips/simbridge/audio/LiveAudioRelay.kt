@@ -69,19 +69,21 @@ class LiveAudioRelay(private val context: Context) {
             val minRecordBuf = AudioRecord.getMinBufferSize(sampleRate, channelIn, encoding)
             val minPlayBuf = AudioTrack.getMinBufferSize(sampleRate, channelOut, encoding)
 
-            // In Android 14/15/16, fallback chain: VOICE_COMMUNICATION -> MIC
+            val primarySource = if (useSpeaker) MediaRecorder.AudioSource.MIC else MediaRecorder.AudioSource.VOICE_COMMUNICATION
+            val fallbackSource = if (useSpeaker) MediaRecorder.AudioSource.VOICE_COMMUNICATION else MediaRecorder.AudioSource.MIC
+
             audioRecord = try {
                 AudioRecord(
-                    MediaRecorder.AudioSource.VOICE_COMMUNICATION,
+                    primarySource,
                     sampleRate,
                     channelIn,
                     encoding,
                     maxOf(minRecordBuf, 2048)
                 )
             } catch (e: Exception) {
-                AppLog.w(tag, "VOICE_COMMUNICATION source failed, falling back to MIC")
+                AppLog.w(tag, "Primary source $primarySource failed, falling back to $fallbackSource")
                 AudioRecord(
-                    MediaRecorder.AudioSource.MIC,
+                    fallbackSource,
                     sampleRate,
                     channelIn,
                     encoding,

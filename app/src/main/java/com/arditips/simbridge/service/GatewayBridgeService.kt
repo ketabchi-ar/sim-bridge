@@ -57,7 +57,9 @@ class GatewayBridgeService : Service() {
         }
 
         fun dispatchCallState(state: String, callerNumber: String?) {
-            instance?.sendCallStateToClient(state, callerNumber)
+            val resolvedNumber = callerNumber 
+                ?: BridgeInCallService.currentCall?.details?.handle?.schemeSpecificPart
+            instance?.sendCallStateToClient(state, resolvedNumber)
         }
     }
 
@@ -226,15 +228,22 @@ class GatewayBridgeService : Service() {
         try {
             when (action) {
                 CallCommand.ACTION_ANSWER -> {
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                        telecomManager?.acceptRingingCall()
-                        AppLog.i(tag, "Call answered via TelecomManager")
+                    val answered = BridgeInCallService.answerCurrentCall()
+                    if (!answered) {
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                            telecomManager?.acceptRingingCall()
+                            AppLog.i(tag, "Call answered via TelecomManager fallback")
+                        }
                     }
+                    BridgeInCallService.setSpeaker(true)
                 }
                 CallCommand.ACTION_REJECT, CallCommand.ACTION_HANGUP -> {
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-                        telecomManager?.endCall()
-                        AppLog.i(tag, "Call ended via TelecomManager")
+                    val ended = BridgeInCallService.endCurrentCall()
+                    if (!ended) {
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                            telecomManager?.endCall()
+                            AppLog.i(tag, "Call ended via TelecomManager fallback")
+                        }
                     }
                 }
             }
